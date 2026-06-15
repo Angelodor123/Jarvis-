@@ -1,0 +1,29 @@
+# Secrets — NEVER commit these
+config/api_keys.json
+config/google_credentials.json
+config/google_token.json
+
+# Generated / runtime
+# Note: memory/long_term.json is pre-seeded with your identity for first boot.
+# It's gitignored because JARVIS will continuously update it with personal data
+# during use — you likely don't want that history in git. If you want your
+# starting seed in the repo, run: git add -f memory/long_term.json once.
+memory/long_term.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Chrome profiles created at runtime
+**/JarvisChromeProfile/
+.jarvis_chrome_profile/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

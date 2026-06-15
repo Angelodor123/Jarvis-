@@ -1,0 +1,13 @@
+{
+  "voice_name": "Charon",
+  "available_voices": {
+    "Puck":    "Upbeat, energetic — default Gemini voice",
+    "Charon":  "Deep, calm, informative — current JARVIS default",
+    "Kore":    "Firm, confident, professional",
+    "Fenrir":  "Excitable, expressive",
+    "Aoede":   "Breezy, light, conversational",
+    "Leda":    "Youthful, bright",
+    "Orus":    "Firm, authoritative",
+    "Zephyr":  "Bright, energetic"
+  }
+}
