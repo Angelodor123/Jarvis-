@@ -1,151 +1,341 @@
 # REDESIGN+AGENTS+TOOLS 2026-06-16
 """
-canva_tool.py — Canva Connect API integration for VECTOR agent.
-Uses Canva Connect REST API directly (requests).
-Requires "canva_api_key" in config/api_keys.json.
+canva_tool.py — Canva browser automation for VECTOR agent.
+Uses Playwright with the persistent JarvisChromeProfile (same profile as portfolio_tracker).
+
+First-time setup:
+  1. Jarvis opens a Chrome window automatically on first call.
+  2. Log into canva.com in that window.
+  3. The session persists for all future calls.
+
+Supported actions:
+  create_design   — open Canva, click "Create a design", pick format, set title
+  list_designs    — list recent designs from your Canva home
+  export_design   — open a design URL/ID and download it locally
+  get_design      — get the title and current URL of an open/recent design
 """
 
-import json
+import asyncio
 import os
-import sys
+import platform
+import threading
 import time
 from pathlib import Path
 
-import requests
+from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
 
-CANVA_API_BASE = "https://api.canva.com/rest/v1"
+CANVA_HOME   = "https://www.canva.com/"
+CANVA_CREATE = "https://www.canva.com/create/"
 
-FORMAT_SIZES = {
-    "instagram_post":  {"width": 1080, "height": 1080, "unit": "px"},
-    "instagram_story": {"width": 1080, "height": 1920, "unit": "px"},
-    "facebook_post":   {"width": 1200, "height": 630,  "unit": "px"},
-    "poster":          {"width": 2480, "height": 3508, "unit": "px"},
-    "presentation":    {"width": 1920, "height": 1080, "unit": "px"},
+FORMAT_PATHS = {
+    "instagram_post":  "https://www.canva.com/create/instagram-posts/",
+    "instagram_story": "https://www.canva.com/create/instagram-stories/",
+    "facebook_post":   "https://www.canva.com/create/facebook-posts/",
+    "poster":          "https://www.canva.com/create/posters/",
+    "presentation":    "https://www.canva.com/create/presentations/",
 }
 
 
-def _get_base_dir() -> Path:
-    if getattr(sys, "frozen", False):
-        return Path(sys.executable).parent
-    return Path(__file__).resolve().parent.parent
-
-
-def _load_api_key() -> str:
-    path = _get_base_dir() / "config" / "api_keys.json"
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-    key = data.get("canva_api_key", "").strip()
-    if not key:
-        raise ValueError("canva_api_key not found in api_keys.json")
-    return key
-
-
-def _headers() -> dict:
-    return {
-        "Authorization": f"Bearer {_load_api_key()}",
-        "Content-Type":  "application/json",
-    }
+def _profile_dir() -> Path:
+    if platform.system() == "Windows":
+        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+        return base / "JarvisChromeProfile"
+    return Path.home() / ".jarvis_chrome_profile"
 
 
 def _default_output() -> Path:
-    desktop = Path.home() / "Desktop" / "Jarvis_Exports"
-    desktop.mkdir(parents=True, exist_ok=True)
-    return desktop
+    out = Path.home() / "Desktop" / "Jarvis_Exports"
+    out.mkdir(parents=True, exist_ok=True)
+    return out
+
+
+class _CanvaThread:
+    """Runs a persistent Chrome context on its own event loop / thread."""
+
+    def __init__(self):
+        self._loop       = None
+        self._thread     = None
+        self._ready      = threading.Event()
+        self._playwright = None
+        self._context    = None
+
+    def start(self):
+        if self._thread and self._thread.is_alive():
+            return
+        self._thread = threading.Thread(target=self._run_loop, daemon=True, name="CanvaThread")
+        self._thread.start()
+        self._ready.wait(timeout=15)
+
+    def _run_loop(self):
+        self._loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_until_complete(self._init())
+        self._ready.set()
+        self._loop.run_forever()
+
+    async def _init(self):
+        self._playwright = await async_playwright().start()
+
+    def run(self, coro, timeout: int = 90):
+        if not self._loop:
+            raise RuntimeError("CanvaThread not started.")
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        return future.result(timeout=timeout)
+
+    async def _ensure_context(self):
+        if self._context:
+            return self._context
+
+        profile_dir = _profile_dir()
+        profile_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            self._context = await self._playwright.chromium.launch_persistent_context(
+                user_data_dir=str(profile_dir),
+                headless=False,
+                channel="chrome",
+                viewport=None,
+                args=["--start-maximized"],
+            )
+        except Exception:
+            self._context = await self._playwright.chromium.launch_persistent_context(
+                user_data_dir=str(profile_dir),
+                headless=False,
+                viewport=None,
+                args=["--start-maximized"],
+            )
+        return self._context
+
+    async def _get_page(self, url: str):
+        for attempt in range(2):
+            try:
+                ctx  = await self._ensure_context()
+                page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+                await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                return page
+            except Exception as e:
+                print(f"[Canva] Browser error (attempt {attempt + 1}): {e}")
+                if self._context:
+                    try:
+                        await self._context.close()
+                    except Exception:
+                        pass
+                    self._context = None
+                if attempt >= 1:
+                    raise
+        raise RuntimeError("Could not open Canva page after retrying.")
+
+    def _is_logged_in(self, url: str) -> bool:
+        return "canva.com" in url and "login" not in url and "signup" not in url
+
+    async def list_designs(self) -> str:
+        page = await self._get_page(CANVA_HOME)
+        try:
+            await page.wait_for_load_state("networkidle", timeout=12000)
+        except PlaywrightTimeout:
+            pass
+
+        if not self._is_logged_in(page.url):
+            return (
+                "Canva requires login. A Chrome window is open — "
+                "please log into canva.com, then ask me again."
+            )
+
+        # Scrape design card titles from the home page
+        try:
+            await page.wait_for_selector("[data-testid='design-card'], [class*='designCard'], [class*='DesignCard']", timeout=8000)
+        except PlaywrightTimeout:
+            pass
+
+        titles = await page.evaluate("""
+            () => {
+                const candidates = [
+                    ...document.querySelectorAll('[data-testid="design-card"] [class*="title"]'),
+                    ...document.querySelectorAll('[class*="designCardTitle"]'),
+                    ...document.querySelectorAll('[class*="DesignCard"] span'),
+                    ...document.querySelectorAll('li[class*="design"] span'),
+                ];
+                return [...new Set(candidates.map(el => el.textContent.trim()).filter(t => t.length > 0))].slice(0, 15);
+            }
+        """)
+
+        if not titles:
+            return "Canva home loaded but no designs detected. Try asking me to create a new design instead."
+        return "Recent Canva designs:\n" + "\n".join(f"- {t}" for t in titles)
+
+    async def create_design(self, fmt: str, prompt: str) -> str:
+        url = FORMAT_PATHS.get(fmt.lower(), CANVA_CREATE)
+        page = await self._get_page(url)
+        try:
+            await page.wait_for_load_state("networkidle", timeout=15000)
+        except PlaywrightTimeout:
+            pass
+
+        if not self._is_logged_in(page.url):
+            return (
+                "Canva requires login. A Chrome window is open — "
+                "please log into canva.com, then ask me again."
+            )
+
+        # Click "Create [format]" or the primary CTA button
+        try:
+            btn = page.locator(
+                "a[href*='/design/'], button[class*='create'], button[class*='Create'], "
+                "[data-testid*='create'], a[class*='cta']"
+            ).first
+            if await btn.is_visible(timeout=5000):
+                await btn.click()
+                await page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception:
+            pass
+
+        current_url = page.url
+        return (
+            f"Canva design opened for format: {fmt}.\n"
+            f"Prompt/concept: {prompt}\n"
+            f"URL: {current_url}\n"
+            "The design is open in the browser — you can edit it directly in Canva."
+        )
+
+    async def export_design(self, design_url: str, exp_fmt: str, out_dir: Path) -> str:
+        if not design_url.startswith("http"):
+            # treat as design ID
+            design_url = f"https://www.canva.com/design/{design_url}/edit"
+
+        page = await self._get_page(design_url)
+        try:
+            await page.wait_for_load_state("networkidle", timeout=20000)
+        except PlaywrightTimeout:
+            pass
+
+        if not self._is_logged_in(page.url):
+            return "Canva requires login. Please log in and try again."
+
+        # Click the Share/Download button (Canva uses a "Share" button that opens download)
+        try:
+            share_btn = page.locator(
+                "button[data-testid='share-button'], button[aria-label*='Share'], "
+                "button[class*='share'], button[data-testid*='share']"
+            ).first
+            await share_btn.click(timeout=8000)
+            await page.wait_for_timeout(1000)
+        except Exception:
+            return (
+                "Could not find the Share/Download button. "
+                "The design is open in the browser — please download it manually."
+            )
+
+        # Click "Download" option inside the share panel
+        try:
+            dl_btn = page.locator(
+                "[data-testid='download-button'], button[aria-label*='Download'], "
+                "li[data-testid*='download'], [class*='download']"
+            ).first
+            await dl_btn.click(timeout=5000)
+            await page.wait_for_timeout(1000)
+        except Exception:
+            return "Share panel opened. Click 'Download' in the panel to save the design."
+
+        # Set format if selector available
+        try:
+            fmt_select = page.locator("[data-testid='file-type-selector'], select[class*='fileType']").first
+            if await fmt_select.is_visible(timeout=3000):
+                await fmt_select.select_option(label=exp_fmt.upper())
+        except Exception:
+            pass
+
+        # Click the final Download button and capture the download
+        out_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            async with page.expect_download(timeout=30000) as dl_info:
+                final_btn = page.locator(
+                    "button[data-testid='download-submit-button'], "
+                    "button[class*='downloadButton'], button[aria-label*='Download']"
+                ).last
+                await final_btn.click(timeout=8000)
+            download = await dl_info.value
+            save_path = out_dir / (download.suggested_filename or f"canva_export.{exp_fmt}")
+            await download.save_as(str(save_path))
+            return f"Design exported to: {save_path}"
+        except Exception as e:
+            return (
+                f"Download initiated but could not auto-save: {e}\n"
+                "Check your browser's download folder."
+            )
+
+    async def get_design(self) -> str:
+        ctx = await self._ensure_context()
+        if not ctx.pages:
+            return "No Canva design currently open."
+        page = ctx.pages[0]
+        title = await page.title()
+        return f"Current design: {title}\nURL: {page.url}"
+
+    async def close(self):
+        if self._context:
+            await self._context.close()
+            self._context = None
+
+
+# ── Singleton ──────────────────────────────────────────────────────────────────
+_ct         = _CanvaThread()
+_ct_started = False
+_ct_lock    = threading.Lock()
+
+
+def _ensure_started():
+    global _ct_started
+    with _ct_lock:
+        if not _ct_started:
+            _ct.start()
+            _ct_started = True
 
 
 def canva_tool(parameters: dict, player=None, speak=None) -> str:
-    action    = (parameters or {}).get("action", "").lower().strip()
-    prompt    = parameters.get("prompt", "")
-    fmt       = parameters.get("format", "instagram_post").lower()
-    design_id = parameters.get("design_id", "")
-    exp_fmt   = parameters.get("export_format", "png").lower()
-    out_dir   = Path(parameters.get("output_path", str(_default_output())))
-    new_fmt   = parameters.get("new_format", "instagram_post").lower()
+    """
+    parameters:
+        action        : create_design | list_designs | export_design | get_design
+        prompt        : design description / concept (for create_design)
+        format        : instagram_post | instagram_story | facebook_post | poster | presentation
+        design_id     : design URL or ID (for export_design)
+        export_format : png | pdf | jpg (default: png)
+        output_path   : local folder path (default: Desktop/Jarvis_Exports)
+    """
+    _ensure_started()
+
+    action     = (parameters or {}).get("action", "").lower().strip()
+    prompt     = parameters.get("prompt", "")
+    fmt        = parameters.get("format", "instagram_post").lower()
+    design_id  = parameters.get("design_id", "")
+    exp_fmt    = parameters.get("export_format", "png").lower()
+    out_dir    = Path(parameters.get("output_path", str(_default_output())))
 
     try:
         if action == "list_designs":
-            r = requests.get(f"{CANVA_API_BASE}/designs", headers=_headers(), timeout=15)
-            r.raise_for_status()
-            designs = r.json().get("items", [])[:10]
-            if not designs:
-                return "No designs found in Canva account."
-            lines = [f"- {d.get('title', 'Untitled')} (ID: {d.get('id')}, updated: {d.get('updated_at', '')[:10]})" for d in designs]
-            return "Recent Canva designs:\n" + "\n".join(lines)
+            result = _ct.run(_ct.list_designs(), timeout=60)
 
-        if action == "get_design":
-            r = requests.get(f"{CANVA_API_BASE}/designs/{design_id}", headers=_headers(), timeout=15)
-            r.raise_for_status()
-            d = r.json()
-            return (
-                f"Design: {d.get('title', 'Untitled')}\n"
-                f"ID: {d.get('id')}\n"
-                f"Preview: {d.get('thumbnail', {}).get('url', 'N/A')}\n"
-                f"Updated: {d.get('updated_at', '')[:10]}"
-            )
+        elif action == "create_design":
+            result = _ct.run(_ct.create_design(fmt, prompt), timeout=60)
 
-        if action == "create_design":
-            size = FORMAT_SIZES.get(fmt, FORMAT_SIZES["instagram_post"])
-            payload = {
-                "design_type": {
-                    "type": "custom",
-                    "width":  size["width"],
-                    "height": size["height"],
-                    "unit":   size["unit"],
-                },
-                "title": prompt[:100] if prompt else "J.A.R.V.I.S Design",
-            }
-            r = requests.post(f"{CANVA_API_BASE}/designs", headers=_headers(), json=payload, timeout=15)
-            r.raise_for_status()
-            d = r.json().get("design", r.json())
-            did = d.get("id", "")
-            url = d.get("urls", {}).get("edit_url", "open Canva to edit")
-            return f"Design created! ID: {did}\nEdit at: {url}\nFormat: {fmt} ({size['width']}×{size['height']}px)"
+        elif action == "export_design":
+            if not design_id:
+                return "export_design requires a design_id (URL or Canva design ID)."
+            result = _ct.run(_ct.export_design(design_id, exp_fmt, out_dir), timeout=90)
 
-        if action == "export_design":
-            payload = {"design_id": design_id, "format": exp_fmt.upper()}
-            r = requests.post(f"{CANVA_API_BASE}/exports", headers=_headers(), json=payload, timeout=30)
-            r.raise_for_status()
-            job = r.json()
-            job_id = job.get("job", {}).get("id", "")
+        elif action == "get_design":
+            result = _ct.run(_ct.get_design(), timeout=30)
 
-            # Poll for completion
-            for _ in range(20):
-                time.sleep(2)
-                status_r = requests.get(f"{CANVA_API_BASE}/exports/{job_id}", headers=_headers(), timeout=15)
-                status_r.raise_for_status()
-                status_data = status_r.json()
-                status = status_data.get("job", {}).get("status", "")
-                if status == "success":
-                    urls = status_data.get("job", {}).get("urls", [])
-                    if urls:
-                        file_url = urls[0]
-                        out_dir.mkdir(parents=True, exist_ok=True)
-                        out_path = out_dir / f"canva_export_{design_id[:8]}.{exp_fmt}"
-                        file_data = requests.get(file_url, timeout=30).content
-                        out_path.write_bytes(file_data)
-                        return f"Design exported to: {out_path}"
-                    break
-                elif status == "failed":
-                    return "Export failed on Canva side."
-            return "Export timed out. Check Canva account."
+        elif action == "resize_design":
+            return "resize_design: open the design in Canva and use Resize & Magic Switch from the toolbar."
 
-        if action == "resize_design":
-            size = FORMAT_SIZES.get(new_fmt, FORMAT_SIZES["instagram_post"])
-            payload = {
-                "design_id": design_id,
-                "design_type": {
-                    "type": "custom",
-                    "width":  size["width"],
-                    "height": size["height"],
-                    "unit":   size["unit"],
-                },
-            }
-            r = requests.post(f"{CANVA_API_BASE}/designs/{design_id}/resize", headers=_headers(), json=payload, timeout=15)
-            r.raise_for_status()
-            d = r.json().get("design", r.json())
-            return f"Design resized to {new_fmt} ({size['width']}×{size['height']}px). New ID: {d.get('id', design_id)}"
-
-        return f"Unknown action: {action}"
+        else:
+            return f"Unknown canva_tool action: '{action}'. Use: create_design | list_designs | export_design | get_design."
 
     except Exception as e:
-        return f"canva_tool error: {e}"
+        result = f"canva_tool error: {e}"
+
+    print(f"[Canva] {result[:120]}")
+    if player:
+        player.write_log(f"[canva] {result[:100]}")
+
+    return result
