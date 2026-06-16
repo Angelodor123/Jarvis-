@@ -73,5 +73,5 @@ projects, and TCG portfolio management.
 ## 👤 Owner
 
 **Dor Bareket**
-Built for daily use across Pizza X, Deal or No Deal community management,
-and TCG investing (CardLadder + Collectr).
+Built for daily use across Pizza X,
+TCG investing (CardLadder + Collectr) and general stuff 💪 
