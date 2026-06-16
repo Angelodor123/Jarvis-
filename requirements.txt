@@ -27,3 +27,7 @@ google-auth-httplib2
 google-auth-oauthlib
 faster-whisper
 pyttsx3
+PyGithub
+supabase
+GPUtil
+requests

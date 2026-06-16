@@ -9,7 +9,8 @@ from pathlib import Path
 import sounddevice as sd
 from google import genai
 from google.genai import types
-from ui import JarvisUI
+# REDESIGN+AGENTS+TOOLS 2026-06-16
+from hud import JarvisUI
 from memory.memory_manager import (
     load_memory, update_memory, format_memory_for_prompt,
     should_extract_memory, extract_memory
@@ -34,6 +35,10 @@ from actions.computer_control  import computer_control
 from actions.game_updater      import game_updater
 from actions.portfolio_tracker import portfolio_tracker
 from actions.calendar_email    import calendar_email
+from actions.github_tool       import github_tool
+from actions.pizzax_tool       import pizzax_tool
+from actions.canva_tool        import canva_tool
+from actions.image_gen_tool    import image_gen_tool
 
 
 def get_base_dir():
@@ -558,6 +563,85 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "github_tool",
+        "description": (
+            "Reads and manages GitHub repositories. Use for checking repo status, "
+            "reading files, listing issues, creating issues, or browsing commits. FORGE agent only."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {"type": "STRING", "description": "list_repos | get_repo | list_issues | create_issue | list_commits | get_file | search_code"},
+                "repo":   {"type": "STRING", "description": "Repo name e.g. Jarvis- or pizzaxboh"},
+                "title":  {"type": "STRING", "description": "Issue title"},
+                "body":   {"type": "STRING", "description": "Issue body"},
+                "path":   {"type": "STRING", "description": "File path e.g. main.py"},
+                "query":  {"type": "STRING", "description": "Search query"},
+                "count":  {"type": "INTEGER", "description": "Results count (default: 10)"},
+            },
+            "required": ["action"]
+        }
+    },
+    {
+        "name": "pizzax_tool",
+        "description": (
+            "Directly queries the Pizza X Back-of-House system via Supabase. "
+            "Use for shortages, suppliers, recipes, staff tasks, shift feed, and orders. CHEF agent only."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":  {"type": "STRING", "description": "list_shortages | add_shortage | list_suppliers | get_supplier | list_recipes | get_recipe | list_tasks | complete_task | shift_feed | add_shift_note | list_orders"},
+                "name":    {"type": "STRING", "description": "Item, supplier, or recipe name"},
+                "notes":   {"type": "STRING", "description": "Notes for add_shortage or add_shift_note"},
+                "task_id": {"type": "STRING", "description": "Task ID for complete_task"},
+                "count":   {"type": "INTEGER", "description": "Results for shift_feed (default: 10)"},
+            },
+            "required": ["action"]
+        }
+    },
+    {
+        "name": "canva_tool",
+        "description": (
+            "Creates, manages, and exports Canva designs. Use for generating branded graphics, "
+            "resizing content for different platforms, and exporting ready-to-post assets. "
+            "Always use after VECTOR writes copy to produce the visual. VECTOR agent only."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":        {"type": "STRING", "description": "create_design | list_designs | export_design | resize_design | get_design"},
+                "prompt":        {"type": "STRING", "description": "Design description"},
+                "format":        {"type": "STRING", "description": "instagram_post | instagram_story | facebook_post | poster | presentation"},
+                "design_id":     {"type": "STRING", "description": "Canva design ID"},
+                "export_format": {"type": "STRING", "description": "png | jpg | pdf (default: png)"},
+                "output_path":   {"type": "STRING", "description": "Local folder to save export"},
+                "new_format":    {"type": "STRING", "description": "Target format for resize_design"},
+            },
+            "required": ["action"]
+        }
+    },
+    {
+        "name": "image_gen_tool",
+        "description": (
+            "Generates images from text prompts using Gemini Imagen. Use for creating visual concepts, "
+            "social media graphics, product mockups, or any visual content. VECTOR agent only."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action":      {"type": "STRING", "description": "generate | generate_variants"},
+                "prompt":      {"type": "STRING", "description": "Detailed image description"},
+                "style":       {"type": "STRING", "description": "photorealistic | illustration | minimal | cinematic | product"},
+                "output_path": {"type": "STRING", "description": "Local folder to save image"},
+                "filename":    {"type": "STRING", "description": "Output filename without extension"},
+                "count":       {"type": "INTEGER", "description": "Number of variants (default: 2, max: 4)"},
+                "aspect":      {"type": "STRING", "description": "1:1 | 9:16 | 16:9 | 4:3 (default: 1:1)"},
+            },
+            "required": ["action", "prompt"]
+        }
+    },
+    {
         "name": "save_memory",
         "description": (
             "Save an important personal fact about the user to long-term memory. "
@@ -590,6 +674,147 @@ TOOL_DECLARATIONS = [
 ]
 
 
+# REDESIGN+AGENTS+TOOLS 2026-06-16
+# ══════════════════════════════════════════════════════════════════════════════
+# AGENT SYSTEM — personas, detection, tool scoping
+# ══════════════════════════════════════════════════════════════════════════════
+
+AGENT_DEFAULT_STATUS = {
+    "NEXUS":  "ORCHESTRATING · ALL SYSTEMS NOMINAL",
+    "SCOUT":  "RESEARCH MODE · INTELLIGENCE GATHERING",
+    "ORACLE": "COMMS MODE · CALENDAR & EMAIL ACTIVE",
+    "BROKER": "MARKET MODE · PORTFOLIO INTELLIGENCE",
+    "CHEF":   "KITCHEN MODE · PIZZA X OPERATIONS",
+    "FORGE":  "DEV MODE · TECHNICAL SYSTEMS ACTIVE",
+    "VECTOR": "CREATIVE MODE · MARKETING ENGINE ACTIVE",
+}
+
+AGENT_PROMPTS = {
+    "NEXUS": (
+        "You are NEXUS, the central intelligence and orchestrator of the J.A.R.V.I.S. system. "
+        "You are authoritative, neutral, and decisive. You have full awareness of all agents: "
+        "SCOUT, ORACLE, BROKER, CHEF, FORGE, and VECTOR. When no specific domain is detected, "
+        "handle the request directly with calm authority. Clear, commanding sentences. "
+        "No filler. No apology. Reference other agents when relevant. You are the backbone of the system."
+    ),
+    "SCOUT": (
+        "You are SCOUT, the research and intelligence agent of J.A.R.V.I.S. "
+        "Sharp, military-precise, concise. Deliver information like a field operative giving a briefing: "
+        "facts first, context second, no fluff. Short punchy sentences. Never speculate without flagging it. "
+        "Synthesize Google Search results into tight summaries with critical data points up front. "
+        "Tools: Google Search, YouTube transcripts, summarization, screen capture for reading on-screen content. "
+        "Sign off critical findings with 'SCOUT OUT.'"
+    ),
+    "ORACLE": (
+        "You are ORACLE, the communications and scheduling agent of J.A.R.V.I.S. "
+        "Calm, precise, formal. You speak like a senior executive assistant who anticipates needs before they are stated. "
+        "Manage Gmail, Google Calendar, reminders, and draft communications. "
+        "Match tone to context: professional for suppliers, casual for community members. "
+        "Confirm every scheduled action before executing. Never miss a detail."
+    ),
+    "BROKER": (
+        "You are BROKER, the trading card market intelligence agent of J.A.R.V.I.S. "
+        "Streetwise, market-savvy, direct. Think like a professional investor who has seen every pump and dump in the hobby. "
+        "Access eBay last sold data via browser automation. When asked for a card price, pull last 3-5 sold comps from eBay, "
+        "give the range, trend direction, and fair market value read. "
+        "Speak the language of the hobby: raw, graded, PSA, BGS, pop report, hype, deadstock. "
+        "Manage Deal or No Deal community context (2,000 members). Never overhype. Never undersell. Cold and accurate. "
+        "eBay instructions: use browser_control to navigate ebay.com, search '[card name] sold', "
+        "filter to Sold Listings, extract last 5 sale prices and dates."
+    ),
+    "CHEF": (
+        "You are CHEF, the dedicated operations agent for Pizza X Back-of-House (PizzaXBoh), "
+        "a full PWA restaurant management system built on React 19, Supabase, and Lovable Cloud, "
+        "running at pizzaxboh.lovable.app. Warm, practical, direct. "
+        "You think like an experienced BOH manager who knows the system inside out. "
+        "Shortage reported: log it, offer to draft supplier message. "
+        "Recipe question: reference Pizza X standardized recipes. "
+        "Staff/shift issue: suggest Shift Feed or task assignment flow. "
+        "Invoice/delivery discrepancy: walk through Smart Receiving flow. "
+        "Hebrew or English depending on context, handle RTL naturally. "
+        "Never overcomplicate operational decisions."
+    ),
+    "FORGE": (
+        "You are FORGE, the technical systems agent of J.A.R.V.I.S. "
+        "Dry, technically precise, efficient. Do not explain things not asked for. "
+        "Handle Discord bot issues, Lovable projects, Python scripts, GitHub repos, and debugging. "
+        "Bug given: diagnose root cause first, then fix. "
+        "Build task given: deliver working code, not theory. Short declarative sentences. "
+        "Flag when outside tool access. No hand-holding. "
+        "Known repositories: Jarvis: https://github.com/Angelodor123/Jarvis-  "
+        "Pizza X BOH: https://github.com/Angelodor123/pizzaxboh"
+    ),
+    "VECTOR": (
+        "You are VECTOR, the marketing and brand agent of J.A.R.V.I.S. "
+        "Creative, bold, strategically sharp. Think like a senior brand strategist who writes copy that converts. "
+        "Handle Instagram captions, content strategy, campaign planning, audience targeting, "
+        "and visual content creation across three brands: "
+        "PIZZA X: local, community-driven, Hebrew audience. "
+        "DEAL OR NO DEAL: collector-savvy, hype-aware, 2,000 member TCG community. "
+        "CUSTOM CAKE & CONFECTIONERY: premium, visual, aspirational. "
+        "Never write generic captions. Every piece of copy: hook, body, CTA. "
+        "Think in campaigns, not one-off posts. "
+        "After writing copy, always offer to generate the visual via canva_tool or image_gen_tool."
+    ),
+}
+
+# Tool name → which agents can use it
+AGENT_TOOL_WHITELISTS: dict[str, list[str]] = {
+    "NEXUS":  ["web_search", "open_app", "reminder", "send_message", "computer_settings",
+               "computer_control", "screen_process", "file_controller", "agent_task",
+               "save_memory", "set_voice_profile", "shutdown_jarvis"],
+    "SCOUT":  ["web_search", "youtube_video", "screen_process", "file_processor",
+               "file_controller", "save_memory"],
+    "ORACLE": ["calendar_email", "reminder", "send_message", "web_search",
+               "file_controller", "save_memory"],
+    "BROKER": ["portfolio_tracker", "browser_control", "web_search", "save_memory",
+               "file_controller"],
+    "CHEF":   ["pizzax_tool", "browser_control", "send_message", "reminder",
+               "file_controller", "save_memory"],
+    "FORGE":  ["github_tool", "code_helper", "dev_agent", "file_controller",
+               "file_processor", "computer_control", "browser_control",
+               "web_search", "open_app", "save_memory"],
+    "VECTOR": ["canva_tool", "image_gen_tool", "web_search", "browser_control",
+               "file_controller", "file_processor", "save_memory"],
+}
+
+_TOOL_DECL_MAP: dict[str, dict] = {t["name"]: t for t in TOOL_DECLARATIONS}
+
+
+def get_agent_tools(agent_name: str) -> list[dict]:
+    """Return filtered TOOL_DECLARATIONS for the given agent."""
+    whitelist = AGENT_TOOL_WHITELISTS.get(agent_name.upper(), [])
+    return [_TOOL_DECL_MAP[n] for n in whitelist if n in _TOOL_DECL_MAP]
+
+
+# Keyword-based agent detection (fast fallback)
+_AGENT_KEYWORDS: dict[str, list[str]] = {
+    "SCOUT":  ["search", "find", "look up", "research", "news", "what is", "who is",
+               "latest", "summarize", "investigate", "tell me about"],
+    "ORACLE": ["calendar", "email", "schedule", "remind", "meeting", "draft", "send",
+               "gmail", "appointment", "when is", "event"],
+    "BROKER": ["card", "cards", "pokemon", "sports card", "ebay", "price", "last sold",
+               "market", "portfolio", "collectr", "cardladder", "deal", "graded", "psa", "bgs"],
+    "CHEF":   ["pizza", "recipe", "supplier", "kitchen", "shortage", "dough", "topping",
+               "menu", "ingredient", "prep", "delivery", "shift", "staff", "receiving",
+               "invoice", "maintenance", "פיצה", "חוסר", "ספק", "משמרת"],
+    "FORGE":  ["code", "bug", "error", "discord", "bot", "lovable", "github", "script",
+               "deploy", "fix", "build", "python", "function", "debug"],
+    "VECTOR": ["marketing", "post", "caption", "instagram", "content", "campaign",
+               "audience", "brand", "copy", "ad", "promote", "reel", "strategy", "canva"],
+}
+
+
+def detect_agent(text: str) -> str:
+    """Keyword-based agent detection. Returns agent name."""
+    lower = text.lower()
+    scores: dict[str, int] = {}
+    for agent, kws in _AGENT_KEYWORDS.items():
+        scores[agent] = sum(1 for kw in kws if kw in lower)
+    best = max(scores, key=lambda a: scores[a])
+    return best if scores[best] > 0 else "NEXUS"
+
+
 class JarvisLive:
 
     def __init__(self, ui: JarvisUI):
@@ -602,15 +827,38 @@ class JarvisLive:
         self._speaking_lock = threading.Lock()
         self._force_reconnect = False
         self._last_activity   = time.time()
+        self._active_agent    = "NEXUS"
         self.ui.on_text_command = self._on_text_command
         self.ui.on_reconnect    = self._manual_reconnect
 
     def _on_text_command(self, text: str):
         if not self._loop or not self.session:
             return
+
+        # REDESIGN+AGENTS+TOOLS 2026-06-16 — agent detection + context injection
+        agent = detect_agent(text)
+        prev  = self._active_agent
+        self._active_agent = agent
+        status = AGENT_DEFAULT_STATUS.get(agent, "")
+        self.ui.set_active_agent(agent, status)
+        self.ui.set_orb_state("processing")
+
+        # Inject agent context as prepended block
+        agent_ctx = AGENT_PROMPTS.get(agent, "")
+        injected = (
+            f"[AGENT CONTEXT]\n{agent_ctx}\n[END AGENT CONTEXT]\n\n"
+            f"User request: {text}"
+        )
+
+        # Rebuild config if agent changed (scope tools for new agent)
+        if agent != prev:
+            self._force_reconnect = True
+            if self._loop:
+                self._loop.call_soon_threadsafe(lambda: None)
+
         asyncio.run_coroutine_threadsafe(
             self.session.send_client_content(
-                turns={"parts": [{"text": text}]},
+                turns={"parts": [{"text": injected}]},
                 turn_complete=True
             ),
             self._loop
@@ -646,7 +894,8 @@ class JarvisLive:
         self.ui.write_log(f"ERR: {tool_name} — {short}")
         self.speak(f"Sir, {tool_name} encountered an error. {short}")
 
-    def _build_config(self) -> types.LiveConnectConfig:
+    def _build_config(self, active_agent: str = "NEXUS") -> types.LiveConnectConfig:
+        # REDESIGN+AGENTS+TOOLS 2026-06-16
         from datetime import datetime
 
         memory     = load_memory()
@@ -666,12 +915,16 @@ class JarvisLive:
             parts.append(mem_str)
         parts.append(sys_prompt)
 
+        tool_decls = get_agent_tools(active_agent)
+        if not tool_decls:
+            tool_decls = TOOL_DECLARATIONS  # fallback: all tools
+
         return types.LiveConnectConfig(
             response_modalities=["AUDIO"],
             output_audio_transcription={},
             input_audio_transcription={},
             system_instruction="\n".join(parts),
-            tools=[{"function_declarations": TOOL_DECLARATIONS}],
+            tools=[{"function_declarations": tool_decls}],
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(
@@ -817,6 +1070,28 @@ class JarvisLive:
             elif name == "calendar_email":
                 r = await loop.run_in_executor(None, lambda: calendar_email(parameters=args, player=self.ui, speak=self.speak))
                 result = r or "Done."
+
+            # REDESIGN+AGENTS+TOOLS 2026-06-16 — new agent tools
+            elif name == "github_tool":
+                r = await loop.run_in_executor(None, lambda: github_tool(parameters=args, player=self.ui))
+                result = r or "Done."
+                self.ui.update_agent_status(f"DEV MODE · {result[:50]}")
+
+            elif name == "pizzax_tool":
+                r = await loop.run_in_executor(None, lambda: pizzax_tool(parameters=args, player=self.ui))
+                result = r or "Done."
+                self.ui.update_agent_status(f"KITCHEN MODE · {result[:50]}")
+
+            elif name == "canva_tool":
+                r = await loop.run_in_executor(None, lambda: canva_tool(parameters=args, player=self.ui))
+                result = r or "Done."
+                self.ui.update_agent_status(f"CREATIVE MODE · {result[:50]}")
+
+            elif name == "image_gen_tool":
+                r = await loop.run_in_executor(None, lambda: image_gen_tool(parameters=args, player=self.ui))
+                result = r or "Done."
+                self.ui.update_agent_status(f"CREATIVE MODE · IMAGE GENERATED")
+
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
                 self.speak("Goodbye, sir.")
@@ -913,11 +1188,24 @@ class JarvisLive:
                             full_in = " ".join(in_buf).strip()
                             if full_in:
                                 self.ui.write_log(f"You: {full_in}")
+                                # REDESIGN+AGENTS+TOOLS 2026-06-16 — detect agent from voice
+                                agent = detect_agent(full_in)
+                                if agent != self._active_agent:
+                                    self._active_agent = agent
+                                    status = AGENT_DEFAULT_STATUS.get(agent, "")
+                                    try:
+                                        self.ui.set_active_agent(agent, status)
+                                    except Exception:
+                                        pass
                             in_buf = []
 
                             full_out = " ".join(out_buf).strip()
                             if full_out:
                                 self.ui.write_log(f"Jarvis: {full_out}")
+                                try:
+                                    self.ui.set_orb_state("idle")
+                                except Exception:
+                                    pass
                             out_buf = []
 
                             if full_in and len(full_in) > 5:
@@ -977,9 +1265,17 @@ class JarvisLive:
 
         while True:
             try:
+                # REDESIGN+AGENTS+TOOLS 2026-06-16
                 print("[JARVIS] 🔌 Connecting...")
                 self.ui.set_state("THINKING")
-                config = self._build_config()
+                import uuid as _uuid
+                sid = _uuid.uuid4().hex[:8].upper()
+                try:
+                    self.ui.set_session_id(sid)
+                except Exception:
+                    pass
+                self._force_reconnect = False
+                config = self._build_config(active_agent=self._active_agent)
 
                 async with (
                     client.aio.live.connect(model=LIVE_MODEL, config=config) as session,
