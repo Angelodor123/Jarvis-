@@ -1,6 +1,7 @@
 #web_search.py
 import json
 import sys
+import time
 from pathlib import Path
 
 def _get_base_dir() -> Path:
@@ -39,34 +40,15 @@ def _gemini_search(query: str) -> str:
     return text
 
 
-def _ddg_search(query: str, max_results: int = 6) -> list[dict]:
-    try:
-        from ddgs import DDGS
-    except ImportError:
-        from duckduckgo_search import DDGS
+def _chrome_search(query: str, max_chars: int = 4000) -> str:
+    """Fallback web search that drives the real Google Chrome browser
+    (via actions.browser_control / Playwright) instead of scraping DDG."""
+    from actions.browser_control import browser_control
 
-    results = []
-    with DDGS() as ddgs:
-        for r in ddgs.text(query, max_results=max_results):
-            results.append({
-                "title":   r.get("title",  ""),
-                "snippet": r.get("body",   ""),
-                "url":     r.get("href",   ""),
-            })
-    return results
-
-
-def _format_ddg(query: str, results: list[dict]) -> str:
-    if not results:
-        return f"No results found for: {query}"
-
-    lines = [f"Search results for: {query}\n"]
-    for i, r in enumerate(results, 1):
-        if r.get("title"):   lines.append(f"{i}. {r['title']}")
-        if r.get("snippet"): lines.append(f"   {r['snippet']}")
-        if r.get("url"):     lines.append(f"   {r['url']}")
-        lines.append("")
-    return "\n".join(lines).strip()
+    browser_control({"action": "search", "query": query, "engine": "google"})
+    time.sleep(1.5)  # let the results render before scraping text
+    text = (browser_control({"action": "get_text"}) or "").strip()
+    return text[:max_chars] if text else f"No results found for: {query}"
 
 def _compare(items: list[str], aspect: str) -> str:
     query = (
@@ -76,22 +58,22 @@ def _compare(items: list[str], aspect: str) -> str:
     try:
         return _gemini_search(query)
     except Exception as e:
-        print(f"[WebSearch] ⚠️ Gemini compare failed: {e} — falling back to DDG")
+        print(f"[WebSearch] ⚠️ Gemini compare failed: {e} — falling back to Chrome search")
 
-    # DDG fallback: fetch results per item and merge
-    all_results: dict[str, list] = {}
+    # Chrome fallback: fetch a results snippet per item and merge
+    all_results: dict[str, str] = {}
     for item in items:
         try:
-            all_results[item] = _ddg_search(f"{item} {aspect}", max_results=3)
+            all_results[item] = _chrome_search(f"{item} {aspect}", max_chars=600)
         except Exception:
-            all_results[item] = []
+            all_results[item] = ""
 
     lines = [f"Comparison — {aspect.upper()}", "─" * 40]
     for item in items:
         lines.append(f"\n▸ {item}")
-        for r in all_results.get(item, [])[:2]:
-            if r.get("snippet"):
-                lines.append(f"  • {r['snippet']}")
+        snippet = all_results.get(item, "")
+        if snippet:
+            lines.append(f"  • {snippet[:300]}")
     return "\n".join(lines)
 
 def web_search(
@@ -126,10 +108,9 @@ def web_search(
         print("[WebSearch] ✅ OpenRouter OK.")
         return result
     except Exception as e:
-        print(f"[WebSearch] ⚠️ OpenRouter failed ({e}) — trying DDG...")
-        results = _ddg_search(query)
-        result  = _format_ddg(query, results)
-        print(f"[WebSearch] ✅ DDG: {len(results)} result(s).")
+        print(f"[WebSearch] ⚠️ OpenRouter failed ({e}) — trying Chrome search...")
+        result = _chrome_search(query)
+        print("[WebSearch] ✅ Chrome search complete.")
         return result
     
     except Exception as e:

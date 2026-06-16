@@ -38,23 +38,24 @@ It's not just an assistant — it's an extension of your digital life.
 The UI is built in PyQt6 and designed to look and feel like Tony Stark's interface:
 
 - **Iron Man Arc Reactor Core** — a pulsing radial glow behind the face photo that breathes with Jarvis's state (dim when listening, bright when speaking)
-- **7-Layer Concentric Ring System** — outer decorative rings, three main spinning arc rings, and two inner rings — each at different speeds and opacities
+- **7-Layer Concentric Ring System** — two outer decorative rings, three main spinning arc rings, and two inner rings, each at different speeds and opacities
 - **Circular Arc Gauges** — CPU, MEM, GPU, NET, and TMP displayed as glowing 270° progress rings with color shifts as load increases (cyan → orange → red)
+- **Hexagonal Grid Background** — proper hex-offset geometry with circuit trace overlays, replacing the plain dot grid
 - **Action Overlays** — when Jarvis executes a tool (screenshot, web search, browser control, etc.), a matching Iron Man-style visual animation appears on the HUD canvas
-- **Hexagonal Dot Grid Background** — proper hex-offset dot grid replacing the plain square grid
 - **Reconnect Button** — manual `↺` button to force a new Gemini session if Jarvis stops responding
 - **Auto-Watchdog** — automatically reconnects after 90 seconds of silence
+- **Consolas font** — sharper monospace rendering throughout at increased sizes
 
 ---
 
 ## 🆕 Recent Upgrades
 
 - 🔁 **Session Reliability** — removed unsupported `session_resumption` config that caused 1008 WebSocket disconnects; added 90s auto-watchdog and manual reconnect button
-- 🌐 **OpenRouter Resilience** — dead models (404/400) are blacklisted for the session on first failure; confirmed-working models promoted to the top of the fallback chain
+- 🌐 **OpenRouter Resilience** — dead models (404/400) are blacklisted for the session on first failure; confirmed-working models promoted to top of the fallback chain
 - 📸 **Screenshot Fix** — replaced `Win+Shift+S` hotkey (which opened Snipping Tool UI) with `pyautogui.screenshot()` for reliable direct saves to Desktop
-- 🖥️ **Browser Automation Recovery** — portfolio tracker now auto-recovers when the Chrome window is manually closed, re-opening a fresh context instead of crashing
+- 🖥️ **Browser Automation Recovery** — portfolio tracker auto-recovers when the Chrome window is manually closed, re-opening a fresh context instead of crashing
 - 🚀 **Silent Launch** — `start_jarvis_silent.vbs` launches Jarvis with no console window; supports Windows Startup folder for auto-launch on boot
-- 🔤 **Readability** — switched from Courier New to Consolas throughout, increased all font sizes
+- 🎨 **Visual Overhaul** — arc reactor core glow, 7-ring HUD canvas, circular arc gauges, hexagonal background with circuit traces, faster ring animation speeds
 
 ---
 
@@ -79,7 +80,7 @@ See `LAUNCHING.md` for desktop shortcut, taskbar pin, and auto-start on boot set
 
 | Requirement | Details |
 |---|---|
-| **OS** | Windows 10/11 (primary), macOS/Linux partial support |
+| **OS** | Windows 10/11 (primary) |
 | **Python** | 3.11, 3.12, or 3.13 |
 | **Microphone** | Required for voice interaction |
 | **Gemini API Key** | Free — [aistudio.google.com](https://aistudio.google.com) |
@@ -99,6 +100,3 @@ configured for Pizza X operations, Discord/community automation, Lovable project
 
 **Dor Bareket**  
 Built for daily use across Pizza X, TCG investing (CardLadder + Collectr) and general life automation 💪
-```
-
-Copy-paste that into your `README.md`. Once you save it, let me know and I'll commit + push it.

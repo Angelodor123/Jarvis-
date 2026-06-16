@@ -55,8 +55,13 @@ class C:
     PRI       = "#00d4ff"
     PRI_DIM   = "#007a99"
     PRI_GHO   = "#001f2e"
+    PRI_HOT   = "#aef9ff"
+    PRI_CORE  = "#f2feff"
+    PRI_DEEP  = "#00293d"
     ACC       = "#ff6b00"
     ACC2      = "#ffcc00"
+    AMBER     = "#ffa018"
+    WARN      = "#ff3d1a"
     GREEN     = "#00ff88"
     GREEN_D   = "#00aa55"
     RED       = "#ff3355"
@@ -67,6 +72,8 @@ class C:
     WHITE     = "#d8f8ff"
     DARK      = "#000d14"
     BAR_BG    = "#011520"
+    CIRCUIT   = "#0a2a38"
+    CIRCUIT_B = "#123f52"
 
 
 def qcol(h: str, a: int = 255) -> QColor:
@@ -269,6 +276,10 @@ class HudCanvas(QWidget):
         self._face_px: QPixmap | None = None
         self._load_face(face_path)
 
+        self._bg_size: tuple | None = None
+        self._bg_hex:     list = []
+        self._bg_circuit: list = []
+
         self._action_type:       str | None = None
         self._action_label:      str        = ""
         self._action_alpha:      float      = 0.0
@@ -350,7 +361,7 @@ class HudCanvas(QWidget):
         self._scale += (self._tgt_scale - self._scale) * sp
         self._halo  += (self._tgt_halo  - self._halo)  * sp
 
-        speeds = [1.3, -0.9, 2.0, -1.6, 0.65, -0.45, 1.85] if self.speaking else [0.55, -0.35, 0.9, -0.65, 0.26, -0.18, 0.72]
+        speeds = [2.6, -1.1, 3.4, -2.3, 0.5, -0.3, 4.4] if self.speaking else [1.4, -0.4, 1.9, -1.0, 0.18, -0.12, 2.6]
         for i, spd in enumerate(speeds):
             self._rings[i] = (self._rings[i] + spd) % 360
 
@@ -733,6 +744,93 @@ class HudCanvas(QWidget):
 
     # ── end overlay drawing ────────────────────────────────────────────────────
 
+    def _build_background(self, W, H):
+        """Cache hex-grid + circuit-trace geometry; only rebuilt on resize."""
+        if W <= 0 or H <= 0 or self._bg_size == (W, H):
+            return
+        self._bg_size = (W, H)
+
+        hs     = 58.0
+        hex_w  = hs * 1.8
+        hex_h  = hs * 1.56
+        cols   = int(W / (hex_w * 0.75)) + 3
+        rows   = int(H / hex_h) + 3
+        hexes  = []
+        for row in range(-1, rows):
+            for col in range(-1, cols):
+                hx = col * hex_w * 0.75
+                hy = row * hex_h + (hex_h * 0.5 if col % 2 else 0)
+                pts = [
+                    (hx + hs * 0.5 * math.cos(math.radians(60 * i)),
+                     hy + hs * 0.5 * math.sin(math.radians(60 * i)))
+                    for i in range(6)
+                ]
+                hexes.append(pts)
+        self._bg_hex = hexes
+
+        rnd  = random.Random(7331)
+        step = hs * 1.5
+        traces = []
+        for _ in range(22):
+            x = rnd.randrange(0, int(W), int(step)) if W > step else 0
+            y = rnd.randrange(0, int(H), int(step)) if H > step else 0
+            pts = [(float(x), float(y))]
+            for _ in range(rnd.randint(2, 4)):
+                if rnd.random() < 0.5:
+                    x += rnd.choice([-1, 1]) * step
+                else:
+                    y += rnd.choice([-1, 1]) * step
+                x = max(0.0, min(float(W), x))
+                y = max(0.0, min(float(H), y))
+                pts.append((x, y))
+            traces.append(pts)
+        self._bg_circuit = traces
+
+    def _draw_background(self, p: QPainter, W, H):
+        self._build_background(W, H)
+
+        # structural hex grid (depth layer 1)
+        p.setPen(QPen(qcol(C.CIRCUIT, 60), 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        for pts in self._bg_hex:
+            path = QPainterPath()
+            path.moveTo(pts[0][0], pts[0][1])
+            for x, y in pts[1:]:
+                path.lineTo(x, y)
+            path.closeSubpath()
+            p.drawPath(path)
+
+        # circuit traces with traveling current pulse (depth layer 2)
+        for ti, pts in enumerate(self._bg_circuit):
+            p.setPen(QPen(qcol(C.CIRCUIT_B, 75), 1))
+            for i in range(len(pts) - 1):
+                p.drawLine(QPointF(*pts[i]), QPointF(*pts[i + 1]))
+            p.setBrush(QBrush(qcol(C.CIRCUIT_B, 120))); p.setPen(Qt.PenStyle.NoPen)
+            for x, y in pts:
+                p.drawEllipse(QPointF(x, y), 2, 2)
+            total = len(pts) - 1
+            if total > 0:
+                t    = ((self._tick * 0.6 + ti * 37) % (total * 40)) / 40.0
+                seg  = min(total - 1, int(t))
+                frac = t - int(t)
+                x0, y0 = pts[seg]; x1, y1 = pts[seg + 1]
+                px, py = x0 + (x1 - x0) * frac, y0 + (y1 - y0) * frac
+                p.setBrush(QBrush(qcol(C.PRI, 200))); p.setPen(Qt.PenStyle.NoPen)
+                p.drawEllipse(QPointF(px, py), 2.2, 2.2)
+
+        # fine dot grid overlay (depth layer 3 — original texture, dimmer)
+        hsd = 38
+        p.setPen(QPen(qcol(C.PRI_GHO, 80), 1.2))
+        row = 0; y_dot = 0
+        while y_dot <= H:
+            x_off = hsd // 2 if row % 2 else 0
+            x_dot = x_off
+            while x_dot <= W:
+                p.drawPoint(int(x_dot), int(y_dot))
+                x_dot += hsd
+            y_dot += int(hsd * 0.866)
+            row += 1
+
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -742,19 +840,8 @@ class HudCanvas(QWidget):
         cx, cy = W / 2, H / 2
         fw = min(W, H)
 
-        # hex dot grid background
-        hs = 38
-        p.setPen(QPen(qcol(C.PRI_GHO, 95), 1.5))
-        row = 0
-        y_dot = 0
-        while y_dot <= H:
-            x_off = hs // 2 if row % 2 else 0
-            x_dot = x_off
-            while x_dot <= W:
-                p.drawPoint(int(x_dot), int(y_dot))
-                x_dot += hs
-            y_dot += int(hs * 0.866)
-            row += 1
+        # layered hex-grid / circuit-trace background
+        self._draw_background(p, W, H)
 
         r_face = fw * 0.31
 
@@ -788,17 +875,27 @@ class HudCanvas(QWidget):
             ring_r = fw * r_frac
             base   = self._rings[idx]
             if idx < 2:
-                a_val = max(0, min(255, int(self._halo * (0.38 - idx * 0.08))))
+                a_val = max(0, min(255, int(self._halo * (0.55 - idx * 0.10))))
             elif idx >= 5:
-                a_val = max(0, min(255, int(self._halo * (0.52 - (idx-5) * 0.14))))
+                a_val = max(0, min(255, int(self._halo * (0.70 - (idx-5) * 0.16))))
             else:
-                a_val = max(0, min(255, int(self._halo * (1.0 - (idx-2) * 0.22))))
-            col    = qcol(C.MUTED_C if self.muted else C.PRI, a_val)
-            p.setPen(QPen(col, w_r)); p.setBrush(Qt.BrushStyle.NoBrush)
+                a_val = max(0, min(255, int(self._halo * (1.25 - (idx-2) * 0.22))))
+            ring_col = C.MUTED_C if self.muted else C.PRI
+            col      = qcol(ring_col, a_val)
+            tick_pen = QPen(qcol(C.PRI_HOT if not self.muted else C.WHITE,
+                                  min(255, int(a_val * 0.95))), 1)
             angle = base
             rect  = QRectF(cx - ring_r, cy - ring_r, ring_r * 2, ring_r * 2)
             while angle < base + 360:
+                p.setPen(QPen(col, w_r)); p.setBrush(Qt.BrushStyle.NoBrush)
                 p.drawArc(rect, int(angle * 16), int(arc_l * 16))
+                if 2 <= idx <= 4:
+                    rad = math.radians(angle)
+                    p.setPen(tick_pen)
+                    p.drawLine(
+                        QPointF(cx + (ring_r - w_r) * math.cos(rad), cy + (ring_r - w_r) * math.sin(rad)),
+                        QPointF(cx + (ring_r + w_r * 2.4) * math.cos(rad), cy + (ring_r + w_r * 2.4) * math.sin(rad)),
+                    )
                 angle += arc_l + gap
 
         # scanners
@@ -841,17 +938,20 @@ class HudCanvas(QWidget):
             p.drawLine(QPointF(bx, by), QPointF(bx + dx * bl, by))
             p.drawLine(QPointF(bx, by), QPointF(bx, by + dy * bl))
 
-        # arc reactor core glow (beneath face)
-        for i in range(10, 0, -1):
-            rg = r_face * 0.54 * i / 10
-            intensity = self._halo / 172.0
-            a = max(0, min(255, int(42 * intensity * (i / 10) ** 0.65)))
-            col = C.MUTED_C if self.muted else C.PRI
-            p.setBrush(QBrush(qcol(col, a))); p.setPen(Qt.PenStyle.NoPen)
-            p.drawEllipse(QPointF(cx, cy), rg, rg)
-        # Rotating hex spokes around core
-        hex_a = max(0, min(255, int(self._halo * 0.52)))
+        # arc reactor core glow (beneath face) — true radial-gradient bloom
         col = C.MUTED_C if self.muted else C.PRI
+        intensity = max(0.0, min(1.6, self._halo / 110.0))
+        glow_r = r_face * 0.62
+        bloom = QRadialGradient(QPointF(cx, cy), glow_r)
+        bloom.setColorAt(0.0,  qcol(C.PRI_HOT if not self.muted else "#ffaebb", min(255, int(150 * intensity))))
+        bloom.setColorAt(0.35, qcol(col, min(255, int(95 * intensity))))
+        bloom.setColorAt(0.75, qcol(col, min(255, int(28 * intensity))))
+        bloom.setColorAt(1.0,  qcol(col, 0))
+        p.setBrush(QBrush(bloom)); p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(QPointF(cx, cy), glow_r, glow_r)
+
+        # Rotating hex spokes around core
+        hex_a = max(0, min(255, int(self._halo * 0.6)))
         for i in range(6):
             ha = math.radians(i * 60 + self._rings[4] * 0.9)
             p.setPen(QPen(qcol(col, hex_a), 1)); p.setBrush(Qt.BrushStyle.NoBrush)
@@ -859,15 +959,56 @@ class HudCanvas(QWidget):
                 QPointF(cx + r_face*0.17*math.cos(ha), cy + r_face*0.17*math.sin(ha)),
                 QPointF(cx + r_face*0.30*math.cos(ha), cy + r_face*0.30*math.sin(ha)),
             )
-        # Bright center core dot
-        core_r = r_face * 0.066
-        core_a = min(255, int(self._halo * 1.9))
-        for ci in range(5, 0, -1):
-            ga = max(0, min(255, int(core_a * (1 - ci/6) * 0.42)))
+
+        # Triangular reactor iris — alternating wedge panels
+        n_wedges = 6
+        wedge_r1 = r_face * 0.135
+        wedge_r2 = r_face * 0.345
+        spin = self._rings[4] * 0.7
+        for i in range(n_wedges):
+            a0  = math.radians(i * 360 / n_wedges + spin)
+            a1  = math.radians((i + 1) * 360 / n_wedges + spin)
+            mid = (a0 + a1) / 2
+            path = QPainterPath()
+            path.moveTo(cx + wedge_r1 * math.cos(a0), cy + wedge_r1 * math.sin(a0))
+            path.lineTo(cx + wedge_r2 * math.cos(mid), cy + wedge_r2 * math.sin(mid))
+            path.lineTo(cx + wedge_r1 * math.cos(a1), cy + wedge_r1 * math.sin(a1))
+            path.closeSubpath()
+            shade = 0.55 if i % 2 == 0 else 0.9
+            fa = max(0, min(255, int(self._halo * 0.85 * shade)))
+            p.setBrush(QBrush(qcol(col, fa // 3)))
+            p.setPen(QPen(qcol(C.PRI_HOT if not self.muted else C.MUTED_C, fa), 1.2))
+            p.drawPath(path)
+
+        # Outer triangular collar (sharp geometric reactor frame)
+        coll_r = r_face * 0.40
+        coll_a = max(0, min(255, int(self._halo * 0.95)))
+        pts3 = [
+            (cx + coll_r * math.cos(math.radians(i * 120 + self._rings[2] * -0.6)),
+             cy + coll_r * math.sin(math.radians(i * 120 + self._rings[2] * -0.6)))
+            for i in range(3)
+        ]
+        tripath = QPainterPath()
+        tripath.moveTo(*pts3[0])
+        for x, y in pts3[1:]:
+            tripath.lineTo(x, y)
+        tripath.closeSubpath()
+        p.setPen(QPen(qcol(col, coll_a), 1.4)); p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawPath(tripath)
+
+        # Bright center core dot — layered hotspot with white-hot center
+        core_r = r_face * 0.072
+        core_a = min(255, int(self._halo * 2.1))
+        for ci in range(6, 0, -1):
+            ga = max(0, min(255, int(core_a * (1 - ci / 7) * 0.5)))
             p.setBrush(QBrush(qcol(col, ga))); p.setPen(Qt.PenStyle.NoPen)
-            p.drawEllipse(QPointF(cx, cy), core_r * ci, core_r * ci)
-        p.setBrush(QBrush(qcol(C.WHITE, min(255, int(core_a * 0.82)))))
-        p.drawEllipse(QPointF(cx, cy), core_r * 0.45, core_r * 0.45)
+            p.drawEllipse(QPointF(cx, cy), core_r * ci * 0.85, core_r * ci * 0.85)
+        core_grad = QRadialGradient(QPointF(cx, cy), core_r * 0.75)
+        core_grad.setColorAt(0.0, qcol(C.PRI_CORE, core_a))
+        core_grad.setColorAt(0.6, qcol(C.PRI_HOT, min(255, int(core_a * 0.75))))
+        core_grad.setColorAt(1.0, qcol(col, 0))
+        p.setBrush(QBrush(core_grad)); p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(QPointF(cx, cy), core_r * 0.75, core_r * 0.75)
 
         # face
         if self._face_px:
@@ -926,19 +1067,25 @@ class HudCanvas(QWidget):
         p.setFont(QFont("Consolas", 13, QFont.Weight.Bold))
         p.drawText(QRectF(0, sy, W, 28), Qt.AlignmentFlag.AlignCenter, txt)
 
-        # waveform
+        # waveform — voice activity visualizer (distinct per state)
         wy = sy + 30
-        N, bw = 36, 8
+        N, bw = 40, 7
         wx0 = (W - N * bw) / 2
+        listening = (self.state == "LISTENING" and not self.muted and not self.speaking)
         for i in range(N):
             if self.muted:
-                hgt, cl = 2, qcol(C.MUTED_C)
+                hgt, cl = 2, qcol(C.MUTED_C, 140)
             elif self.speaking:
-                hgt = random.randint(3, 20)
-                cl  = qcol(C.PRI) if hgt > 12 else qcol(C.PRI_DIM)
+                hgt = random.randint(3, 22)
+                cl  = qcol(C.PRI_HOT, 230) if hgt > 13 else qcol(C.PRI, 170)
+            elif listening:
+                env    = 0.35 + 0.65 * abs(math.sin(self._tick * 0.045 + i * 0.5))
+                jitter = random.uniform(0.65, 1.0)
+                hgt    = max(2, int(env * jitter * 17))
+                cl     = qcol(C.GREEN, 225) if hgt > 10 else qcol(C.GREEN_D, 160)
             else:
                 hgt = int(3 + 2 * math.sin(self._tick * 0.09 + i * 0.6))
-                cl  = qcol(C.BORDER_B)
+                cl  = qcol(C.BORDER_B, 180)
             p.fillRect(QRectF(wx0 + i * bw, wy + 20 - hgt, bw - 1, hgt), cl)
 
 class MetricBar(QWidget):
@@ -1003,8 +1150,17 @@ class ArcGauge(QWidget):
         self._color = color
         self._value = 0.0
         self._text  = "--"
+        self._pulse = 0.0
         self.setFixedHeight(80)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._tmr = QTimer(self)
+        self._tmr.timeout.connect(self._tick_pulse)
+        self._tmr.start(60)
+
+    def _tick_pulse(self):
+        if self._value > 65:
+            self._pulse = (self._pulse + 0.16) % (2 * math.pi)
+            self.update()
 
     def set_value(self, pct: float, text: str):
         self._value = max(0.0, min(100.0, pct))
@@ -1019,14 +1175,23 @@ class ArcGauge(QWidget):
         r  = min(W, H - 4) / 2 - 5
         ar = r - 5
 
-        arc_col = C.RED if self._value > 85 else C.ACC if self._value > 65 else self._color
+        arc_col = C.WARN if self._value > 85 else C.AMBER if self._value > 65 else self._color
 
         # Outer glow aura
         p.setPen(QPen(qcol(self._color, 22), 9)); p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawEllipse(QPointF(cx, cy), r + 1, r + 1)
 
-        # Background fill
-        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QBrush(qcol(C.PANEL2, 215)))
+        # Pulsing warning halo when in amber/red threshold
+        if self._value > 65:
+            warn_a = max(0, int(55 + 70 * math.sin(self._pulse)))
+            p.setPen(QPen(qcol(arc_col, warn_a), 2.4)); p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawEllipse(QPointF(cx, cy), r + 4, r + 4)
+
+        # Background fill — radial gradient for depth
+        bgrad = QRadialGradient(QPointF(cx, cy), r)
+        bgrad.setColorAt(0.0, qcol(C.PANEL2, 235))
+        bgrad.setColorAt(1.0, qcol(C.DARK, 235))
+        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QBrush(bgrad))
         p.drawEllipse(QPointF(cx, cy), r, r)
 
         # Track arc (270°, gap at bottom)
@@ -1061,6 +1226,257 @@ class ArcGauge(QWidget):
         p.setFont(QFont("Consolas", 7, QFont.Weight.Bold))
         p.setPen(QPen(qcol(C.TEXT_DIM, 160), 1))
         p.drawText(QRectF(0, cy + 5, W, 11), Qt.AlignmentFlag.AlignCenter, self._label)
+
+
+class StatusChip(QWidget):
+    """Glowing LED-style status chip with active/inactive states."""
+
+    def __init__(self, title: str, subtitle: str, color: str = C.PRI, active: bool = True, parent=None):
+        super().__init__(parent)
+        self._title = title
+        self._subtitle = subtitle
+        self._color = color
+        self._active = active
+        self._phase = 0.0
+        self.setFixedHeight(40)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._tmr = QTimer(self)
+        self._tmr.timeout.connect(self._tick)
+        self._tmr.start(45)
+
+    def set_active(self, active: bool):
+        if self._active != active:
+            self._active = active
+            self.update()
+
+    def set_subtitle(self, subtitle: str):
+        if self._subtitle != subtitle:
+            self._subtitle = subtitle
+            self.update()
+
+    def _tick(self):
+        if self._active:
+            self._phase = (self._phase + 0.09) % (2 * math.pi)
+            self.update()
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        W, H = self.width(), self.height()
+        col = self._color if self._active else C.TEXT_DIM
+        pulse = 0.6 + 0.4 * math.sin(self._phase) if self._active else 0.0
+
+        # Panel body — vertical gradient fill
+        body = QLinearGradient(0, 0, 0, H)
+        body.setColorAt(0.0, qcol(C.PANEL2, 235))
+        body.setColorAt(1.0, qcol(C.DARK, 235))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(body))
+        p.drawRoundedRect(QRectF(0, 0, W, H), 6, 6)
+
+        # Border — brighter glow when active, dim when inactive
+        border_a = int(120 + 100 * pulse) if self._active else 90
+        p.setPen(QPen(qcol(col, border_a), 1.2))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(QRectF(0.5, 0.5, W - 1, H - 1), 6, 6)
+
+        # LED dot with layered bloom
+        lx, ly = 14.0, H / 2
+        if self._active:
+            for gi in range(5, 0, -1):
+                ga = max(0, int(40 * pulse * (1 - gi / 6)))
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QBrush(qcol(col, ga)))
+                p.drawEllipse(QPointF(lx, ly), gi * 2.6, gi * 2.6)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(qcol(col, 255 if self._active else 140)))
+        p.drawEllipse(QPointF(lx, ly), 3.4, 3.4)
+
+        # Title / subtitle text
+        tx = lx + 12
+        p.setFont(QFont("Consolas", 8, QFont.Weight.Bold))
+        p.setPen(QPen(qcol(col, 235 if self._active else 150), 1))
+        p.drawText(QRectF(tx, 3, W - tx - 6, H * 0.55),
+                   Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self._title)
+
+        p.setFont(QFont("Consolas", 7))
+        p.setPen(QPen(qcol(C.TEXT_DIM, 170), 1))
+        p.drawText(QRectF(tx, H * 0.5, W - tx - 6, H * 0.5 - 2),
+                   Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self._subtitle)
+
+
+class Sparkline(QWidget):
+    """Rolling-buffer mini trend chart with glow fill — used for CPU/NET history."""
+
+    def __init__(self, label: str, color: str = C.PRI, max_value: float = 100.0,
+                 capacity: int = 40, parent=None):
+        super().__init__(parent)
+        self._label = label
+        self._color = color
+        self._max   = max_value
+        self._buf: list[float] = []
+        self._cap  = capacity
+        self.setFixedHeight(34)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def push(self, value: float):
+        self._buf.append(max(0.0, value))
+        if len(self._buf) > self._cap:
+            self._buf.pop(0)
+        self.update()
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        W, H = self.width(), self.height()
+        pad_top = 10.0
+
+        p.setFont(QFont("Consolas", 6, QFont.Weight.Bold))
+        p.setPen(QPen(qcol(C.TEXT_DIM, 180), 1))
+        p.drawText(QRectF(0, 0, W, pad_top), Qt.AlignmentFlag.AlignLeft, self._label)
+
+        if len(self._buf) < 2:
+            return
+
+        n       = len(self._buf)
+        plot_h  = H - pad_top
+        step    = W / max(1, self._cap - 1)
+        pts = []
+        for i, v in enumerate(self._buf):
+            x = W - (n - 1 - i) * step
+            frac = max(0.0, min(1.0, v / self._max)) if self._max else 0.0
+            y = pad_top + plot_h * (1 - frac)
+            pts.append(QPointF(x, y))
+
+        # filled area beneath line — gradient bloom
+        area = QPainterPath()
+        area.moveTo(pts[0].x(), pad_top + plot_h)
+        for pt in pts:
+            area.lineTo(pt)
+        area.lineTo(pts[-1].x(), pad_top + plot_h)
+        area.closeSubpath()
+        grad = QLinearGradient(0, pad_top, 0, pad_top + plot_h)
+        grad.setColorAt(0.0, qcol(self._color, 90))
+        grad.setColorAt(1.0, qcol(self._color, 0))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(grad))
+        p.drawPath(area)
+
+        # glowing line — soft halo pass + sharp core pass
+        p.setPen(QPen(qcol(self._color, 60), 4))
+        for i in range(len(pts) - 1):
+            p.drawLine(pts[i], pts[i + 1])
+        p.setPen(QPen(qcol(self._color, 230), 1.4))
+        for i in range(len(pts) - 1):
+            p.drawLine(pts[i], pts[i + 1])
+
+        # current-value hotspot dot
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(qcol(self._color, 255)))
+        p.drawEllipse(pts[-1], 2.2, 2.2)
+
+
+class TickerStrip(QWidget):
+    """Scrolling marquee strip of live stat readouts, ticker-style."""
+
+    def __init__(self, color: str = C.PRI, parent=None):
+        super().__init__(parent)
+        self._color  = color
+        self._text   = ""
+        self._offset = 0.0
+        self.setFixedHeight(22)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._tmr = QTimer(self)
+        self._tmr.timeout.connect(self._step)
+        self._tmr.start(40)
+
+    def set_items(self, items: list[str]):
+        self._text = "    //    ".join(items) if items else ""
+
+    def _step(self):
+        if not self._text:
+            return
+        self._offset -= 1.2
+        self.update()
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        W, H = self.width(), self.height()
+
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(qcol(C.PANEL2, 220)))
+        p.drawRoundedRect(QRectF(0, 0, W, H), 4, 4)
+        p.setPen(QPen(qcol(self._color, 90), 1))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawRoundedRect(QRectF(0.5, 0.5, W - 1, H - 1), 4, 4)
+
+        if not self._text:
+            return
+
+        p.setFont(QFont("Consolas", 8, QFont.Weight.Bold))
+        fm = p.fontMetrics()
+        text_w = fm.horizontalAdvance(self._text) + 60
+
+        if text_w > 0 and self._offset < -text_w:
+            self._offset += text_w
+
+        p.setClipRect(QRectF(2, 0, W - 4, H))
+        p.setPen(QPen(qcol(self._color, 220), 1))
+        x = self._offset
+        while x < W:
+            p.drawText(QRectF(x, 0, text_w, H), Qt.AlignmentFlag.AlignVCenter, self._text)
+            x += max(text_w, 1)
+
+
+class _ScanOverlay(QWidget):
+    """CRT scanline + subtle flicker overlay, painted transparently on top
+    of a target widget. Purely cosmetic — never intercepts mouse events."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground)
+        self._tick = 0
+        self._flicker = 1.0
+        self._tmr = QTimer(self)
+        self._tmr.timeout.connect(self._step)
+        self._tmr.start(50)
+
+    def _step(self):
+        self._tick += 1
+        if self._tick % 37 == 0:
+            self._flicker = random.uniform(0.85, 1.0)
+        else:
+            self._flicker = min(1.0, self._flicker + 0.02)
+        self.update()
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        W, H = self.width(), self.height()
+        if W <= 0 or H <= 0:
+            return
+
+        # static scanlines
+        line_a = max(0, int(14 * self._flicker))
+        p.setPen(QPen(qcol(C.PRI, line_a), 1))
+        for y in range(0, H, 3):
+            p.drawLine(0, y, W, y)
+
+        # traveling bright scan band
+        band_y = (self._tick * 4) % (H + 60) - 30
+        band = QLinearGradient(0, band_y - 30, 0, band_y + 30)
+        band.setColorAt(0.0, qcol(C.PRI, 0))
+        band.setColorAt(0.5, qcol(C.PRI_HOT, max(0, int(26 * self._flicker))))
+        band.setColorAt(1.0, qcol(C.PRI, 0))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(band))
+        p.drawRect(QRectF(0, band_y - 30, W, 60))
+
+        # subtle CRT-flicker dimming pulse
+        if self._flicker < 0.95:
+            p.fillRect(self.rect(), qcol(C.BG, max(0, int(20 * (1 - self._flicker)))))
 
 
 class LogWidget(QTextEdit):
@@ -1098,6 +1514,17 @@ class LogWidget(QTextEdit):
         self._tmr = QTimer(self)
         self._tmr.timeout.connect(self._step)
         self._sig.connect(self._enqueue)
+
+        self._scan = _ScanOverlay(self)
+        self._scan.setGeometry(self.rect())
+        self._scan.raise_()
+        self._scan.show()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if hasattr(self, "_scan"):
+            self._scan.setGeometry(self.rect())
+            self._scan.raise_()
 
     def append_log(self, text: str):
         self._sig.emit(text)
@@ -1616,6 +2043,7 @@ class MainWindow(QMainWindow):
         # CPU
         cpu = snap["cpu"]
         self._gauge_cpu.set_value(cpu, f"{cpu:.0f}%")
+        self._spark_cpu.push(cpu)
 
         # MEM
         mem = snap["mem"]
@@ -1629,6 +2057,7 @@ class MainWindow(QMainWindow):
             net_str = f"{net:.1f}MB/s"
         net_pct = min(100, net * 10)  # 10 MB/s = %100
         self._gauge_net.set_value(net_pct, net_str)
+        self._spark_net.push(net_pct)
 
         # GPU
         gpu = snap["gpu"]
@@ -1659,6 +2088,16 @@ class MainWindow(QMainWindow):
             self._proc_lbl.setText(f"PROC  {proc_count}")
         except Exception:
             self._proc_lbl.setText("PROC  --")
+
+        if hasattr(self, "_ticker"):
+            now_str = time.strftime("%H:%M:%S")
+            self._ticker.set_items([
+                f"CPU {cpu:.0f}%",
+                f"MEM {mem:.0f}%",
+                f"NET {net_str}",
+                f"GPU {gpu:.0f}%" if gpu >= 0 else "GPU N/A",
+                f"SYS TIME {now_str}",
+            ])
 
 
     def _build_header(self) -> QWidget:
@@ -1747,6 +2186,13 @@ class MainWindow(QMainWindow):
 
         lay.addSpacing(4)
 
+        self._spark_cpu = Sparkline("CPU TREND", C.PRI, max_value=100.0)
+        self._spark_net = Sparkline("NET TREND", C.GREEN, max_value=100.0)
+        lay.addWidget(self._spark_cpu)
+        lay.addWidget(self._spark_net)
+
+        lay.addSpacing(4)
+
         info_panel = QWidget()
         info_panel.setStyleSheet(
             f"background: {C.PANEL2}; border: 1px solid {C.BORDER}; border-radius: 6px;"
@@ -1774,19 +2220,12 @@ class MainWindow(QMainWindow):
         lay.addWidget(info_panel)
         lay.addStretch()
 
-        for txt, col in [
-            ("AI CORE\nACTIVE",     C.GREEN),
-            ("SEC\nCLEARED",        C.PRI),
-            ("PROTOCOL\nXXXIX-OR",  C.TEXT_DIM),
-        ]:
-            lbl = QLabel(txt)
-            lbl.setFont(QFont("Consolas", 9, QFont.Weight.Bold))
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl.setStyleSheet(
-                f"color: {col}; background: {C.PANEL2};"
-                f"border: 1px solid {C.BORDER_A}; border-radius: 6px; padding: 5px;"
-            )
-            lay.addWidget(lbl)
+        self._chip_core = StatusChip("AI CORE",    "ACTIVE",     C.GREEN, active=True)
+        self._chip_sec  = StatusChip("SEC",        "CLEARED",    C.PRI,   active=True)
+        self._chip_proto = StatusChip("PROTOCOL",  "XXXIX-OR",   C.AMBER, active=True)
+        lay.addWidget(self._chip_core)
+        lay.addWidget(self._chip_sec)
+        lay.addWidget(self._chip_proto)
 
         return w
     def _build_right_panel(self) -> QWidget:
@@ -1807,6 +2246,9 @@ class MainWindow(QMainWindow):
             l.setFont(QFont("Consolas", 9, QFont.Weight.Bold))
             l.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent;")
             return l
+
+        self._ticker = TickerStrip(C.PRI)
+        lay.addWidget(self._ticker)
 
         lay.addWidget(_sec("ACTIVITY LOG"))
         self._log = LogWidget()
