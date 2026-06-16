@@ -25,7 +25,7 @@ It's not just an assistant — it's an extension of your digital life.
 | 🧠 Persistent Memory | Remembers your identity, projects, and preferences across sessions |
 | 📈 Portfolio Tracking | Live CardLadder (sports cards) and Collectr (TCG) portfolio values |
 | 📅 Calendar & Email | Google Calendar and Gmail integration via OAuth |
-| 🌐 Web Search | DuckDuckGo search with LLM-summarized results |
+| 🌐 Web Search | Google search with LLM-summarized results |
 | 🎬 YouTube | Transcript fetching and video summarization |
 | 🛫 Flight Finder | Real-time flight search via browser automation |
 | 🔔 Reminders | Local reminder scheduling and delivery |
