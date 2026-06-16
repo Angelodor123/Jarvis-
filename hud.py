@@ -85,7 +85,7 @@ BTN_STYLE = f"""
         border: 1px solid {PRI};
         color: {PRI_BRIGHT};
         font-family: 'Courier New', 'Consolas', monospace;
-        font-size: 8pt;
+        font-size: 10pt;
         border-radius: 4px;
         padding: 3px 8px;
     }}
@@ -292,8 +292,8 @@ class StatusPill(QWidget):
         super().__init__(parent)
         self._label  = label
         self._active = False
-        self.setFixedHeight(18)
-        self.setMinimumWidth(70)
+        self.setFixedHeight(22)
+        self.setMinimumWidth(90)
 
     def set_active(self, v: bool):
         if self._active != v:
@@ -305,28 +305,22 @@ class StatusPill(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         W, H = self.width(), self.height()
 
-        col = GREEN if self._active else "#2a3a4a"
-        dot_col = GREEN if self._active else "#3a4a5a"
+        col = GREEN if self._active else "#3a5a6a"
 
         # Pill background
         path = QPainterPath()
-        path.addRoundedRect(QRectF(0, 0, W, H), H / 2, H / 2)
-        p.fillPath(path, qcol(PANEL_BG, 200))
+        path.addRoundedRect(QRectF(0, 0, W, H), 4, 4)
+        p.fillPath(path, qcol("#0a1a2a", 220))
 
-        # Left colored border strip (3px)
+        # Left colored border strip
         strip = QPainterPath()
-        strip.addRoundedRect(QRectF(0, 0, 3, H), 1, 1)
-        p.fillPath(strip, qcol(col, 220))
+        strip.addRoundedRect(QRectF(0, 0, 3, H), 2, 2)
+        p.fillPath(strip, qcol(col, 255))
 
-        # Dot
-        p.setBrush(QBrush(qcol(dot_col, 255)))
-        p.setPen(Qt.PenStyle.NoPen)
-        p.drawEllipse(QPointF(9, H / 2), 3, 3)
-
-        # Label
-        p.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
-        p.setPen(QPen(qcol(col if self._active else TEXT_DIM, 220), 1))
-        p.drawText(QRectF(16, 0, W - 20, H), Qt.AlignmentFlag.AlignVCenter, self._label)
+        # Label (includes the ● prefix)
+        p.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+        p.setPen(QPen(qcol(col, 255), 1))
+        p.drawText(QRectF(8, 0, W - 10, H), Qt.AlignmentFlag.AlignVCenter, self._label)
         p.end()
 
 
@@ -336,7 +330,7 @@ class StatusPill(QWidget):
 class TopBar(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(54)
+        self.setFixedHeight(62)
         self.setStyleSheet(f"background: {PANEL_BG}; border-bottom: 1px solid {BORDER_COL};")
 
         lay = QHBoxLayout(self)
@@ -351,11 +345,11 @@ class TopBar(QWidget):
         title_row = QHBoxLayout()
         title_row.setSpacing(8)
         title_lbl = QLabel("J.A.R.V.I.S.")
-        title_lbl.setFont(QFont("Courier New", 14, QFont.Weight.Bold))
+        title_lbl.setFont(QFont("Courier New", 16, QFont.Weight.Bold))
         title_lbl.setStyleSheet(f"color: {PRI_BRIGHT}; background: transparent;")
         sub_lbl = QLabel("JUST A RATHER VERY INTELLIGENT SYSTEM")
-        sub_lbl.setFont(QFont("Courier New", 8))
-        sub_lbl.setStyleSheet(f"color: {TEXT_DIM}; background: transparent;")
+        sub_lbl.setFont(QFont("Courier New", 10))
+        sub_lbl.setStyleSheet(f"color: {TEXT_MED}; background: transparent;")
         title_row.addWidget(title_lbl)
         title_row.addWidget(sub_lbl)
         title_row.addStretch()
@@ -363,10 +357,10 @@ class TopBar(QWidget):
 
         pills_row = QHBoxLayout()
         pills_row.setSpacing(5)
-        self._pill_online    = StatusPill("ONLINE")
-        self._pill_queue     = StatusPill("QUEUE")
-        self._pill_connected = StatusPill("CONNECTED")
-        self._pill_autoidle  = StatusPill("AUTO-IDLE")
+        self._pill_online    = StatusPill("● ONLINE")
+        self._pill_queue     = StatusPill("● QUEUE")
+        self._pill_connected = StatusPill("● CONNECTED")
+        self._pill_autoidle  = StatusPill("● AUTO-IDLE")
         for pill in (self._pill_online, self._pill_queue, self._pill_connected, self._pill_autoidle):
             pills_row.addWidget(pill)
         pills_row.addStretch()
@@ -381,18 +375,18 @@ class TopBar(QWidget):
         right.setAlignment(Qt.AlignmentFlag.AlignRight)
 
         self._clock_lbl = QLabel("00:00:00.00")
-        self._clock_lbl.setFont(QFont("Courier New", 14, QFont.Weight.Bold))
+        self._clock_lbl.setFont(QFont("Courier New", 18, QFont.Weight.Bold))
         self._clock_lbl.setStyleSheet(f"color: {TEXT_WHITE}; background: transparent;")
         self._clock_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
 
         self._sid_lbl = QLabel("SID · --------")
-        self._sid_lbl.setFont(QFont("Courier New", 8))
-        self._sid_lbl.setStyleSheet(f"color: {TEXT_DIM}; background: transparent;")
+        self._sid_lbl.setFont(QFont("Courier New", 9))
+        self._sid_lbl.setStyleSheet(f"color: {TEXT_MED}; background: transparent;")
         self._sid_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
 
         self._gps_lbl = QLabel(_gps_text)
-        self._gps_lbl.setFont(QFont("Courier New", 7))
-        self._gps_lbl.setStyleSheet(f"color: {TEXT_DIM}; background: transparent;")
+        self._gps_lbl.setFont(QFont("Courier New", 8))
+        self._gps_lbl.setStyleSheet(f"color: {TEXT_MED}; background: transparent;")
         self._gps_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
 
         right.addWidget(self._clock_lbl)
@@ -471,9 +465,9 @@ class LeftPanel(QWidget):
 
         def _hdr(txt):
             l = QLabel(txt)
-            l.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
-            l.setStyleSheet(f"color: {PRI}; background: transparent; "
-                            f"border-bottom: 1px solid {BORDER_COL}; padding-bottom: 2px;")
+            l.setFont(QFont("Courier New", 10, QFont.Weight.Bold))
+            l.setStyleSheet(f"color: {PRI_BRIGHT}; background: transparent; "
+                            f"border-bottom: 1px solid {BORDER_COL}; padding-bottom: 3px;")
             return l
 
         lay.addWidget(_hdr("SYSTEM VITALS"))
@@ -484,10 +478,10 @@ class LeftPanel(QWidget):
             row = QHBoxLayout()
             row.setContentsMargins(0, 0, 0, 0)
             lbl_name = QLabel(name)
-            lbl_name.setFont(QFont("Courier New", 8))
-            lbl_name.setStyleSheet(f"color: {TEXT_DIM}; background: transparent;")
+            lbl_name.setFont(QFont("Courier New", 10))
+            lbl_name.setStyleSheet(f"color: {TEXT_MED}; background: transparent;")
             lbl_val = QLabel("--")
-            lbl_val.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+            lbl_val.setFont(QFont("Courier New", 10, QFont.Weight.Bold))
             lbl_val.setStyleSheet(f"color: {PRI_BRIGHT}; background: transparent;")
             lbl_val.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
             row.addWidget(lbl_name)
@@ -506,10 +500,10 @@ class LeftPanel(QWidget):
 
         self._log = QTextEdit()
         self._log.setReadOnly(True)
-        self._log.setFont(QFont("Courier New", 7))
+        self._log.setFont(QFont("Courier New", 9))
         self._log.setStyleSheet(f"""
             QTextEdit {{
-                background: {BG}; color: #4a9a6a;
+                background: {BG}; color: #55cc88;
                 border: 1px solid {BORDER_COL}; border-radius: 2px;
                 padding: 4px;
             }}
@@ -670,11 +664,11 @@ class RightPanel(QWidget):
             row = QHBoxLayout()
             row.setContentsMargins(0, 0, 0, 0)
             dot = QLabel("●")
-            dot.setFont(QFont("Courier New", 9))
+            dot.setFont(QFont("Courier New", 11))
             dot.setStyleSheet(f"color: #2a3a4a; background: transparent;")
             lbl = QLabel(name)
-            lbl.setFont(QFont("Courier New", 7))
-            lbl.setStyleSheet(f"color: {TEXT_DIM}; background: transparent;")
+            lbl.setFont(QFont("Courier New", 9))
+            lbl.setStyleSheet(f"color: {TEXT_MED}; background: transparent;")
             row.addWidget(dot)
             row.addWidget(lbl)
             row.addStretch()
@@ -686,10 +680,10 @@ class RightPanel(QWidget):
 
         self._diag = QTextEdit()
         self._diag.setReadOnly(True)
-        self._diag.setFont(QFont("Courier New", 7))
+        self._diag.setFont(QFont("Courier New", 9))
         self._diag.setStyleSheet(f"""
             QTextEdit {{
-                background: {BG}; color: #4a9a6a;
+                background: {BG}; color: #55cc88;
                 border: 1px solid {BORDER_COL}; border-radius: 2px;
                 padding: 4px;
             }}
@@ -746,16 +740,16 @@ class AgentCard(QWidget):
         left_lay.setContentsMargins(0, 0, 0, 0)
 
         self._micro_lbl = QLabel("ACTIVE AGENT")
-        self._micro_lbl.setFont(QFont("Courier New", 7))
-        self._micro_lbl.setStyleSheet(f"color: {TEXT_DIM}; background: transparent;")
+        self._micro_lbl.setFont(QFont("Courier New", 9))
+        self._micro_lbl.setStyleSheet(f"color: {TEXT_MED}; background: transparent;")
 
         self._name_lbl = QLabel("NEXUS")
-        self._name_lbl.setFont(QFont("Courier New", 16, QFont.Weight.Bold))
+        self._name_lbl.setFont(QFont("Courier New", 20, QFont.Weight.Bold))
         self._name_lbl.setStyleSheet(f"color: {self._agent_color}; background: transparent;")
 
         self._status_lbl = QLabel(self._agent_status)
-        self._status_lbl.setFont(QFont("Courier New", 8))
-        self._status_lbl.setStyleSheet(f"color: {TEXT_DIM}; background: transparent;")
+        self._status_lbl.setFont(QFont("Courier New", 10))
+        self._status_lbl.setStyleSheet(f"color: {TEXT_MED}; background: transparent;")
 
         left_lay.addWidget(self._micro_lbl)
         left_lay.addWidget(self._name_lbl)
@@ -876,15 +870,15 @@ class NetworkWidget(QWidget):
         lay.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         hdr = QLabel("NETWORK")
-        hdr.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
-        hdr.setStyleSheet(f"color: {PRI}; background: transparent; "
+        hdr.setFont(QFont("Courier New", 10, QFont.Weight.Bold))
+        hdr.setStyleSheet(f"color: {PRI_BRIGHT}; background: transparent; "
                           f"border-bottom: 1px solid {BORDER_COL}; padding-bottom: 2px;")
         lay.addWidget(hdr)
 
         self._up_lbl = QLabel("UP · 0.0 MB/s")
         self._dn_lbl = QLabel("DN · 0.0 MB/s")
         for l in (self._up_lbl, self._dn_lbl):
-            l.setFont(QFont("Courier New", 9, QFont.Weight.Bold))
+            l.setFont(QFont("Courier New", 10, QFont.Weight.Bold))
             l.setStyleSheet(f"color: {PRI_BRIGHT}; background: transparent;")
             lay.addWidget(l)
 
@@ -1030,7 +1024,7 @@ class HudWindow(QMainWindow):
         # Command input
         self._input = QLineEdit()
         self._input.setPlaceholderText("Type a command or question…")
-        self._input.setFont(QFont("Courier New", 9))
+        self._input.setFont(QFont("Courier New", 11))
         self._input.setFixedHeight(24)
         self._input.setStyleSheet(f"""
             QLineEdit {{
