@@ -25,12 +25,12 @@ from PyQt6.QtCore import (
 )
 from PyQt6.QtGui import (
     QBrush, QColor, QFont, QPainter, QPainterPath,
-    QPen, QRadialGradient, QKeySequence,
+    QPen, QRadialGradient, QKeySequence, QShortcut,
 )
 from PyQt6.QtWidgets import (
     QApplication, QGridLayout, QHBoxLayout, QLabel,
     QLineEdit, QMainWindow, QPushButton, QSizePolicy,
-    QTextEdit, QVBoxLayout, QWidget, QShortcut,
+    QTextEdit, QVBoxLayout, QWidget,
 )
 
 _OS = platform.system()
