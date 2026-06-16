@@ -941,7 +941,7 @@ class HudCanvas(QWidget):
         # arc reactor core glow (beneath face) — true radial-gradient bloom
         col = C.MUTED_C if self.muted else C.PRI
         intensity = max(0.0, min(1.6, self._halo / 110.0))
-        glow_r = r_face * 0.62
+        glow_r = r_face * 0.82
         bloom = QRadialGradient(QPointF(cx, cy), glow_r)
         bloom.setColorAt(0.0,  qcol(C.PRI_HOT if not self.muted else "#ffaebb", min(255, int(150 * intensity))))
         bloom.setColorAt(0.35, qcol(col, min(255, int(95 * intensity))))
@@ -993,12 +993,29 @@ class HudCanvas(QWidget):
         for x, y in pts3[1:]:
             tripath.lineTo(x, y)
         tripath.closeSubpath()
-        p.setPen(QPen(qcol(col, coll_a), 1.4)); p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(qcol(col, coll_a), 1.8)); p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawPath(tripath)
+
+        # Second counter-rotating triangle (60° offset, green) — forms hexagram
+        coll_r2 = r_face * 0.38
+        pts3b = [
+            (cx + coll_r2 * math.cos(math.radians(i * 120 + 60 + self._rings[2] * 0.6)),
+             cy + coll_r2 * math.sin(math.radians(i * 120 + 60 + self._rings[2] * 0.6)))
+            for i in range(3)
+        ]
+        tripath2 = QPainterPath()
+        tripath2.moveTo(*pts3b[0])
+        for x, y in pts3b[1:]:
+            tripath2.lineTo(x, y)
+        tripath2.closeSubpath()
+        tri2_a = max(0, min(255, int(coll_a * 0.75)))
+        p.setPen(QPen(qcol(C.GREEN if not self.muted else C.MUTED_C, tri2_a), 1.4))
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.drawPath(tripath2)
 
         # Bright center core dot — layered hotspot with white-hot center
         core_r = r_face * 0.072
-        core_a = min(255, int(self._halo * 2.1))
+        core_a = min(255, int(self._halo * 2.6))
         for ci in range(6, 0, -1):
             ga = max(0, min(255, int(core_a * (1 - ci / 7) * 0.5)))
             p.setBrush(QBrush(qcol(col, ga))); p.setPen(Qt.PenStyle.NoPen)
@@ -1226,6 +1243,82 @@ class ArcGauge(QWidget):
         p.setFont(QFont("Consolas", 7, QFont.Weight.Bold))
         p.setPen(QPen(qcol(C.TEXT_DIM, 160), 1))
         p.drawText(QRectF(0, cy + 5, W, 11), Qt.AlignmentFlag.AlignCenter, self._label)
+
+
+class SegBar(QWidget):
+    """Horizontal segmented VU-meter bar — sharp military readout style."""
+
+    def __init__(self, label: str, color: str = C.PRI, parent=None):
+        super().__init__(parent)
+        self._label = label
+        self._color = color
+        self._value = 0.0
+        self._text  = "--"
+        self._pulse = 0.0
+        self.setFixedHeight(24)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._tmr = QTimer(self)
+        self._tmr.timeout.connect(self._tick_pulse)
+        self._tmr.start(60)
+
+    def _tick_pulse(self):
+        if self._value > 60:
+            self._pulse = (self._pulse + 0.18) % (2 * math.pi)
+            self.update()
+
+    def set_value(self, pct: float, text: str):
+        self._value = max(0.0, min(100.0, pct))
+        self._text  = text
+        self.update()
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        W, H = self.width(), self.height()
+
+        arc_col = C.WARN if self._value > 85 else C.AMBER if self._value > 65 else self._color
+
+        # Background
+        p.fillRect(0, 0, W, H, qcol(C.BG, 255))
+
+        # Left accent bar
+        p.fillRect(0, 0, 4, H, qcol(arc_col, 200))
+
+        # Label
+        label_x = 7
+        label_w = 32
+        p.setFont(QFont("Consolas", 7, QFont.Weight.Bold))
+        p.setPen(QPen(qcol(C.TEXT_DIM, 180), 1))
+        p.drawText(label_x, 0, label_w, H, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self._label)
+
+        # Value text (right side)
+        val_w = 38
+        p.setFont(QFont("Consolas", 7, QFont.Weight.Bold))
+        p.setPen(QPen(qcol(arc_col, 230), 1))
+        p.drawText(W - val_w, 0, val_w, H, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, self._text)
+
+        # Segments
+        n_segs = 14
+        bar_x = label_x + label_w + 3
+        bar_w = W - bar_x - val_w - 4
+        bar_h = H - 6
+        bar_y = 3
+        seg_gap = 2
+        seg_w = max(1, (bar_w - seg_gap * (n_segs - 1)) // n_segs)
+        active = int(self._value / 100 * n_segs)
+
+        for i in range(n_segs):
+            sx = bar_x + i * (seg_w + seg_gap)
+            is_tip = (i == active - 1) and self._value > 60
+            if i < active:
+                seg_a = 230
+                if is_tip:
+                    pulse_boost = int(55 * math.sin(self._pulse))
+                    seg_a = min(255, 180 + pulse_boost)
+                seg_col = C.WARN if i >= int(n_segs * 0.85) else C.AMBER if i >= int(n_segs * 0.65) else self._color
+                p.fillRect(sx, bar_y, seg_w, bar_h, qcol(seg_col, seg_a))
+            else:
+                p.fillRect(sx, bar_y, seg_w, bar_h, qcol(C.BAR_BG, 180))
 
 
 class StatusChip(QWidget):
@@ -1490,8 +1583,8 @@ class LogWidget(QTextEdit):
             QTextEdit {{
                 background: {C.PANEL};
                 color: {C.TEXT};
-                border: 1px solid {C.BORDER};
-                border-radius: 6px;
+                border: 1px solid {C.BORDER_B};
+                border-radius: 2px;
                 padding: 12px;
                 selection-background-color: {C.PRI_GHO};
             }}
@@ -2153,36 +2246,48 @@ class MainWindow(QMainWindow):
         w.setMinimumWidth(150)
         w.setMaximumWidth(195)
         w.setStyleSheet(
-            f"background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
-            f"stop:0 {C.DARK}, stop:1 {C.PANEL}); "
-            f"border-right: 1px solid {C.BORDER};"
+            f"background: {C.BG}; "
+            f"border-right: 2px solid {C.BORDER_B};"
         )
         lay = QVBoxLayout(w)
         lay.setContentsMargins(8, 10, 8, 10)
-        lay.setSpacing(6)
+        lay.setSpacing(4)
 
-        hdr = QLabel("◈ SYS MONITOR")
+        hdr = QLabel("◈  SYS MONITOR")
         hdr.setFont(QFont("Consolas", 9, QFont.Weight.Bold))
         hdr.setStyleSheet(f"color: {C.PRI}; background: transparent; "
-                          f"border-bottom: 1px solid {C.BORDER}; padding-bottom: 4px;")
+                          f"border-bottom: 1px solid {C.BORDER_B}; padding-bottom: 4px;")
         lay.addWidget(hdr)
+        lay.addSpacing(4)
+
+        def _section(txt):
+            l = QLabel(f"▸  {txt}")
+            l.setFont(QFont("Consolas", 7, QFont.Weight.Bold))
+            l.setStyleSheet(f"color: {C.TEXT_DIM}; background: transparent; "
+                            f"border-bottom: 1px solid {C.BORDER}; padding-bottom: 2px;")
+            return l
+
+        lay.addWidget(_section("COMPUTE"))
         lay.addSpacing(2)
 
-        self._gauge_cpu = ArcGauge("CPU", C.PRI)
-        self._gauge_mem = ArcGauge("MEM", C.ACC2)
-        self._gauge_net = ArcGauge("NET", C.GREEN)
-        self._gauge_gpu = ArcGauge("GPU", C.ACC)
-        self._gauge_tmp = ArcGauge("TMP", "#ff6688")
+        self._gauge_cpu = SegBar("CPU", C.PRI)
+        self._gauge_mem = SegBar("MEM", C.ACC2)
+        self._gauge_gpu = SegBar("GPU", C.ACC)
+        lay.addWidget(self._gauge_cpu)
+        lay.addSpacing(2)
+        lay.addWidget(self._gauge_mem)
+        lay.addSpacing(2)
+        lay.addWidget(self._gauge_gpu)
+        lay.addSpacing(6)
 
-        gauge_grid = QGridLayout()
-        gauge_grid.setSpacing(3)
-        gauge_grid.setContentsMargins(0, 0, 0, 0)
-        gauge_grid.addWidget(self._gauge_cpu, 0, 0)
-        gauge_grid.addWidget(self._gauge_mem, 0, 1)
-        gauge_grid.addWidget(self._gauge_gpu, 1, 0)
-        gauge_grid.addWidget(self._gauge_net, 1, 1)
-        gauge_grid.addWidget(self._gauge_tmp, 2, 0, 1, 2)
-        lay.addLayout(gauge_grid)
+        lay.addWidget(_section("I/O"))
+        lay.addSpacing(2)
+
+        self._gauge_net = SegBar("NET", C.GREEN)
+        self._gauge_tmp = SegBar("TMP", "#ff6688")
+        lay.addWidget(self._gauge_net)
+        lay.addSpacing(2)
+        lay.addWidget(self._gauge_tmp)
 
         lay.addSpacing(4)
 
@@ -2242,9 +2347,10 @@ class MainWindow(QMainWindow):
         lay.setSpacing(6)
 
         def _sec(txt):
-            l = QLabel(f"▸ {txt}")
+            l = QLabel(f"◈  {txt}")
             l.setFont(QFont("Consolas", 9, QFont.Weight.Bold))
-            l.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent;")
+            l.setStyleSheet(f"color: {C.PRI}; background: transparent; "
+                            f"border-bottom: 1px solid {C.BORDER}; padding-bottom: 2px;")
             return l
 
         self._ticker = TickerStrip(C.PRI)
@@ -2263,10 +2369,10 @@ class MainWindow(QMainWindow):
         self._drop_zone.file_selected.connect(self._on_file_selected)
         lay.addWidget(self._drop_zone)
 
-        self._file_hint = QLabel("No file loaded — drop or click above to upload")
-        self._file_hint.setFont(QFont("Consolas", 9))
+        self._file_hint = QLabel("No file loaded")
+        self._file_hint.setFont(QFont("Consolas", 8))
+        self._file_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._file_hint.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent;")
-        self._file_hint.setWordWrap(True)
         lay.addWidget(self._file_hint)
 
         sep2 = QFrame(); sep2.setFrameShape(QFrame.Shape.HLine)
@@ -2278,9 +2384,9 @@ class MainWindow(QMainWindow):
 
         btn_row = QHBoxLayout(); btn_row.setSpacing(5)
 
-        self._mute_btn = QPushButton("🎙  MICROPHONE ACTIVE")
+        self._mute_btn = QPushButton("🎙  MIC ACTIVE")
         self._mute_btn.setFixedHeight(30)
-        self._mute_btn.setFont(QFont("Consolas", 10, QFont.Weight.Bold))
+        self._mute_btn.setFont(QFont("Consolas", 9, QFont.Weight.Bold))
         self._mute_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._mute_btn.clicked.connect(self._toggle_mute)
         self._style_mute_btn()
@@ -2368,7 +2474,7 @@ class MainWindow(QMainWindow):
         lay.addStretch()
         lay.addWidget(_fl("MARK XXXIX-OR  ·  PERSONAL ASSISTANT"))
         lay.addStretch()
-        lay.addWidget(_fl("ONLINE", C.GREEN_D))
+        lay.addWidget(_fl("●  ONLINE", C.GREEN))
         return w
 
     def _on_file_selected(self, path: str):
@@ -2401,7 +2507,7 @@ class MainWindow(QMainWindow):
 
     def _style_mute_btn(self):
         if self._muted:
-            self._mute_btn.setText("🔇  MICROPHONE MUTED")
+            self._mute_btn.setText("🔇  MIC MUTED")
             self._mute_btn.setStyleSheet(f"""
                 QPushButton {{
                     background: #140006; color: {C.MUTED_C};
@@ -2409,7 +2515,7 @@ class MainWindow(QMainWindow):
                 }}
             """)
         else:
-            self._mute_btn.setText("🎙  MICROPHONE ACTIVE")
+            self._mute_btn.setText("🎙  MIC ACTIVE")
             self._mute_btn.setStyleSheet(f"""
                 QPushButton {{
                     background: #00140a; color: {C.GREEN};
