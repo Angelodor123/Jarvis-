@@ -563,6 +563,20 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "agent_roll_call",
+        "description": (
+            "Performs a sequential roll call where each of the 7 agents introduces themselves "
+            "one by one. Use this ONLY when the user explicitly asks each agent to say hello, "
+            "introduce themselves, speak, or do a roll call. Each agent speaks a short greeting "
+            "in their own voice/personality. Never substitute this with a plain text list."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {},
+            "required": []
+        }
+    },
+    {
         "name": "show_agent_status",
         "description": (
             "Displays a visual status board on the HUD showing all 7 agents (NEXUS, SCOUT, ORACLE, "
@@ -782,7 +796,8 @@ AGENT_PROMPTS = {
 AGENT_TOOL_WHITELISTS: dict[str, list[str]] = {
     "NEXUS":  ["web_search", "open_app", "reminder", "send_message", "computer_settings",
                "computer_control", "screen_process", "file_controller", "agent_task",
-               "save_memory", "set_voice_profile", "show_agent_status", "shutdown_jarvis"],
+               "save_memory", "set_voice_profile", "show_agent_status", "agent_roll_call",
+               "shutdown_jarvis"],
     "SCOUT":  ["web_search", "youtube_video", "screen_process", "file_processor",
                "file_controller", "save_memory"],
     "ORACLE": ["calendar_email", "reminder", "send_message", "web_search",
@@ -1119,6 +1134,39 @@ class JarvisLive:
                 except Exception:
                     pass
                 result = summary
+
+            elif name == "agent_roll_call":
+                _ROLL_CALL_LINES = {
+                    "NEXUS":  "NEXUS online. Central intelligence active. All systems nominal. I coordinate the team.",
+                    "SCOUT":  "SCOUT reporting. Research and intelligence module ready. Point me at a target.",
+                    "ORACLE": "ORACLE standing by. Communications and scheduling are my domain. Your calendar is clear.",
+                    "BROKER": "BROKER here. Market intelligence, card valuations, portfolio tracking. Show me a deal.",
+                    "CHEF":   "CHEF active. Pizza X back-of-house operations fully online. Kitchen is ready.",
+                    "FORGE":  "FORGE operational. Dev systems, GitHub, debug pipelines. Code is clean.",
+                    "VECTOR": "VECTOR engaged. Creative direction, brand strategy, content generation. Let's build something.",
+                }
+                _prev_agent = self._active_agent
+
+                def _do_roll_call(jarvis_ref=self):
+                    import time
+                    for agent in ["NEXUS", "SCOUT", "ORACLE", "BROKER", "CHEF", "FORGE", "VECTOR"]:
+                        jarvis_ref._active_agent = agent
+                        try:
+                            jarvis_ref.ui.set_active_agent(agent, AGENT_DEFAULT_STATUS.get(agent, ""))
+                        except Exception:
+                            pass
+                        line = _ROLL_CALL_LINES.get(agent, f"{agent} online.")
+                        jarvis_ref.speak(line)
+                        time.sleep(3.5)
+                    # restore original agent
+                    jarvis_ref._active_agent = _prev_agent
+                    try:
+                        jarvis_ref.ui.set_active_agent(_prev_agent, AGENT_DEFAULT_STATUS.get(_prev_agent, ""))
+                    except Exception:
+                        pass
+
+                threading.Thread(target=_do_roll_call, daemon=True).start()
+                result = "Roll call initiated. All seven agents standing by."
 
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")
