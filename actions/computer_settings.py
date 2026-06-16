@@ -351,16 +351,24 @@ def type_text(text: str, press_enter_after: bool = False):
         pyautogui.press("enter")
 
 def take_screenshot():
-    if _OS == "Windows":
-        pyautogui.hotkey("win", "shift", "s")
-    elif _OS == "Darwin":
-        pyautogui.hotkey("command", "shift", "3")
-    else:
-        for cmd in [["scrot"], ["gnome-screenshot"], ["import", "-window", "root", "screenshot.png"]]:
-            if subprocess.run(["which", cmd[0]], capture_output=True).returncode == 0:
-                subprocess.Popen(cmd)
-                return
-        pyautogui.hotkey("ctrl", "print_screen")
+    try:
+        save_path = Path.home() / "Desktop" / "jarvis_screenshot.png"
+        img = pyautogui.screenshot()
+        img.save(str(save_path))
+        print(f"[Settings] Screenshot saved: {save_path}")
+        return str(save_path)
+    except Exception as e:
+        print(f"[Settings] Screenshot failed: {e}")
+        if _OS == "Windows":
+            pyautogui.hotkey("win", "shift", "s")
+        elif _OS == "Darwin":
+            pyautogui.hotkey("command", "shift", "3")
+        else:
+            for cmd in [["scrot"], ["gnome-screenshot"]]:
+                if subprocess.run(["which", cmd[0]], capture_output=True).returncode == 0:
+                    subprocess.Popen(cmd)
+                    return
+            pyautogui.hotkey("ctrl", "print_screen")
 
 def lock_screen():
     if _OS == "Windows":
@@ -665,8 +673,8 @@ def computer_settings(
         return f"Unknown action: '{raw_action}'."
 
     try:
-        func()
-        return f"Done: {action}."
+        result = func()
+        return str(result) if result else f"Done: {action}."
     except Exception as e:
         print(f"[Settings] Action failed ({action}): {e}")
         return f"Action failed ({action}): {e}"

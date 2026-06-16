@@ -2,6 +2,7 @@ import asyncio
 import threading
 import json
 import sys
+import time
 import traceback
 from pathlib import Path
 
@@ -600,7 +601,9 @@ class JarvisLive:
         self._is_speaking   = False
         self._speaking_lock = threading.Lock()
         self._force_reconnect = False
+        self._last_activity   = time.time()
         self.ui.on_text_command = self._on_text_command
+        self.ui.on_reconnect    = self._manual_reconnect
 
     def _on_text_command(self, text: str):
         if not self._loop or not self.session:
@@ -612,6 +615,12 @@ class JarvisLive:
             ),
             self._loop
         )
+
+    def _manual_reconnect(self):
+        print("[JARVIS] 🔄 Manual reconnect triggered.")
+        self._force_reconnect = True
+        if self._loop:
+            self._loop.call_soon_threadsafe(lambda: None)  # wake the loop
 
     def set_speaking(self, value: bool):
         with self._speaking_lock:
@@ -663,7 +672,6 @@ class JarvisLive:
             input_audio_transcription={},
             system_instruction="\n".join(parts),
             tools=[{"function_declarations": TOOL_DECLARATIONS}],
-            session_resumption=types.SessionResumptionConfig(),
             speech_config=types.SpeechConfig(
                 voice_config=types.VoiceConfig(
                     prebuilt_voice_config=types.PrebuiltVoiceConfig(
@@ -679,6 +687,7 @@ class JarvisLive:
 
         print(f"[JARVIS] 🔧 {name}  {args}")
         self.ui.set_state("THINKING")
+        self.ui.show_action(name)
         if name == "set_voice_profile":
             voice_name = args.get("voice_name", "").strip()
             ok = _save_voice_name(voice_name)
@@ -850,10 +859,12 @@ class JarvisLive:
                 jarvis_speaking = self._is_speaking
             if not jarvis_speaking and not self.ui.muted:
                 data = indata.tobytes()
-                loop.call_soon_threadsafe(
-                    self.out_queue.put_nowait,
-                    {"data": data, "mime_type": "audio/pcm"}
-                )
+                def _safe_put(msg={"data": data, "mime_type": "audio/pcm"}):
+                    try:
+                        self.out_queue.put_nowait(msg)
+                    except asyncio.QueueFull:
+                        pass  # drop oldest-ish; queue drains on next send tick
+                loop.call_soon_threadsafe(_safe_put)
 
         try:
             with sd.InputStream(
@@ -894,6 +905,7 @@ class JarvisLive:
                             txt = sc.input_transcription.text.strip()
                             if txt:
                                 in_buf.append(txt)
+                                self._last_activity = time.time()
 
                         if sc.turn_complete:
                             self.set_speaking(False)
@@ -983,11 +995,13 @@ class JarvisLive:
                     self.ui.write_log("SYS: JARVIS online.")
                     consecutive_failures = 0
 
+                    self._last_activity = time.time()
                     tg.create_task(self._send_realtime())
                     tg.create_task(self._listen_audio())
                     tg.create_task(self._receive_audio())
                     tg.create_task(self._play_audio())
                     tg.create_task(self._watch_reconnect())
+                    tg.create_task(self._watchdog())
 
             except Exception as e:
                 print(f"[JARVIS] ⚠️ {e}")
@@ -1040,6 +1054,20 @@ class JarvisLive:
         except Exception as e:
             print(f"[JARVIS] Degraded mode error: {e}")
             await asyncio.sleep(5)
+
+    async def _watchdog(self):
+        """Auto-reconnects if session has been silent for too long while listening."""
+        TIMEOUT = 90  # seconds of silence before forcing reconnect
+        while True:
+            await asyncio.sleep(15)
+            if self._is_speaking or self.ui.muted or self._force_reconnect:
+                self._last_activity = time.time()
+                continue
+            silent_for = time.time() - self._last_activity
+            if silent_for > TIMEOUT:
+                print(f"[JARVIS] ⚠️ No activity for {silent_for:.0f}s — auto-reconnecting.")
+                self.ui.write_log("SYS: Session silent — auto-reconnecting…")
+                self._force_reconnect = True
 
     async def _watch_reconnect(self):
         """Breaks the current session's TaskGroup when a voice change is requested."""

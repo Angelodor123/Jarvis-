@@ -103,10 +103,24 @@ class _PortfolioThread:
         return self._context
 
     async def _get_page(self, url: str):
-        ctx = await self._ensure_context()
-        page = ctx.pages[0] if ctx.pages else await ctx.new_page()
-        await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-        return page
+        for attempt in range(2):
+            try:
+                ctx = await self._ensure_context()
+                page = ctx.pages[0] if ctx.pages else await ctx.new_page()
+                await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                return page
+            except Exception as e:
+                print(f"[Portfolio] Browser error (attempt {attempt + 1}): {e}")
+                # Context is dead — tear it down and let _ensure_context rebuild
+                if self._context:
+                    try:
+                        await self._context.close()
+                    except Exception:
+                        pass
+                    self._context = None
+                if attempt >= 1:
+                    raise
+        raise RuntimeError("Could not open browser page after retrying.")
 
     async def cardladder_summary(self) -> str:
         page = await self._get_page(CARDLADDER_URL)

@@ -35,25 +35,18 @@ def _load_api_key() -> str:
 
 # Primary: strongest free models first, deep fallback chain
 TEXT_MODELS: list[str] = [
-    # Tier 1 — Best reasoning
-    "qwen/qwen3-235b-a22b:free",
-    "deepseek/deepseek-r1-0528:free",
-    "deepseek/deepseek-chat-v3-5:free",
+    # Tier 1 — Confirmed working (move proven models to front)
     "nvidia/nemotron-3-super-120b-a12b:free",
     "meta-llama/llama-3.3-70b-instruct:free",
-    # Tier 2 — Strong mid-tier
-    "qwen/qwen3-next-80b-a3b-instruct:free",
-    "qwen/qwen3-coder:free",
-    "minimax/minimax-m2.5:free",
-    "nousresearch/hermes-3-llama-3.1-405b:free",
     "google/gemma-4-31b-it:free",
-    "google/gemma-4-26b-a4b-it:free",
     "google/gemma-3-27b-it:free",
+    # Tier 2 — Strong mid-tier
+    "google/gemma-4-26b-a4b-it:free",
+    "nousresearch/hermes-3-llama-3.1-405b:free",
     "arcee-ai/trinity-large-preview:free",
     "z-ai/glm-4.5-air:free",
     # Tier 3 — Lightweight fallbacks
     "nvidia/nemotron-3-nano-30b-a3b:free",
-    "cognitivecomputations/dolphin-mistral-24b-venice-edition:free",
     "google/gemma-3-12b-it:free",
     "nvidia/nemotron-nano-12b-v2-vl:free",
     "nvidia/nemotron-nano-9b-v2:free",
@@ -83,7 +76,8 @@ MAX_RETRIES_PER_MODEL = 2    # attempts before moving to next model
 RETRY_DELAY           = 2    # seconds between retries
 RATE_LIMIT_COOLDOWN   = 60   # seconds before retrying a rate-limited model
 
-_rate_limited: dict[str, float] = {}
+_rate_limited:  dict[str, float] = {}
+_dead_models:   set[str]         = set()  # 404/400 permanent failures this session
 
 class OpenRouterClient:
 
@@ -142,6 +136,11 @@ class OpenRouterClient:
                     self._mark_rate_limited(model)
                     return None
 
+                if resp.status_code in (400, 404):
+                    _dead_models.add(model)
+                    logger.warning(f"[OpenRouter] {model} → permanently dead (HTTP {resp.status_code}), skipping for session")
+                    return None
+
                 if resp.status_code == 200:
                     data    = resp.json()
                     content = (
@@ -188,7 +187,7 @@ class OpenRouterClient:
             )
 
         for m in pool:
-            if self._is_rate_limited(m):
+            if self._is_rate_limited(m) or m in _dead_models:
                 continue
             logger.info(f"[OpenRouter] Trying: {m}")
             result = self._call(m, messages, max_tokens, temperature, response_format)
