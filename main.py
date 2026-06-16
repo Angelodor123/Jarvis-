@@ -563,6 +563,26 @@ TOOL_DECLARATIONS = [
         }
     },
     {
+        "name": "show_agent_status",
+        "description": (
+            "Displays a visual status board on the HUD showing all 7 agents (NEXUS, SCOUT, ORACLE, "
+            "BROKER, CHEF, FORGE, VECTOR) with their modes and current status. "
+            "ALWAYS call this tool when the user asks for an agent overview, agent status, "
+            "who are the agents, show all agents, or any similar request. "
+            "Never just speak a list — show the board and speak a brief summary."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "summary": {
+                    "type": "STRING",
+                    "description": "One-sentence verbal summary to speak after showing the board"
+                }
+            },
+            "required": []
+        }
+    },
+    {
         "name": "github_tool",
         "description": (
             "Reads and manages GitHub repositories. Use for checking repo status, "
@@ -762,7 +782,7 @@ AGENT_PROMPTS = {
 AGENT_TOOL_WHITELISTS: dict[str, list[str]] = {
     "NEXUS":  ["web_search", "open_app", "reminder", "send_message", "computer_settings",
                "computer_control", "screen_process", "file_controller", "agent_task",
-               "save_memory", "set_voice_profile", "shutdown_jarvis"],
+               "save_memory", "set_voice_profile", "show_agent_status", "shutdown_jarvis"],
     "SCOUT":  ["web_search", "youtube_video", "screen_process", "file_processor",
                "file_controller", "save_memory"],
     "ORACLE": ["calendar_email", "reminder", "send_message", "web_search",
@@ -1091,6 +1111,14 @@ class JarvisLive:
                 r = await loop.run_in_executor(None, lambda: image_gen_tool(parameters=args, player=self.ui))
                 result = r or "Done."
                 self.ui.update_agent_status(f"CREATIVE MODE · IMAGE GENERATED")
+
+            elif name == "show_agent_status":
+                summary = args.get("summary", "All agents are online and operational.")
+                try:
+                    self.ui.show_agent_board(self._active_agent)
+                except Exception:
+                    pass
+                result = summary
 
             elif name == "shutdown_jarvis":
                 self.ui.write_log("SYS: Shutdown requested.")

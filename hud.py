@@ -816,6 +816,136 @@ def _hex_to_rgba(hex_col: str, alpha: int) -> str:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# AGENT STATUS BOARD — full overlay showing all 7 agents
+# ══════════════════════════════════════════════════════════════════════════════
+_AGENT_LIST = ["NEXUS", "SCOUT", "ORACLE", "BROKER", "CHEF", "FORGE", "VECTOR"]
+_AGENT_MODES = {
+    "NEXUS":  "ORCHESTRATING",
+    "SCOUT":  "RESEARCH MODE",
+    "ORACLE": "COMMS MODE",
+    "BROKER": "MARKET MODE",
+    "CHEF":   "KITCHEN MODE",
+    "FORGE":  "DEV MODE",
+    "VECTOR": "CREATIVE MODE",
+}
+
+
+class AgentStatusBoard(QWidget):
+    """Full-canvas overlay showing status of all 7 agents. Auto-hides after timeout."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+        self.hide()
+
+        self._active_agent = "NEXUS"
+        self._statuses: dict[str, str] = {a: "NOMINAL" for a in _AGENT_LIST}
+
+        self._hide_tmr = QTimer(self)
+        self._hide_tmr.setSingleShot(True)
+        self._hide_tmr.timeout.connect(self.hide)
+
+        self._fade = 1.0
+
+    def show_board(self, active_agent: str, statuses: dict[str, str] | None = None, timeout_ms: int = 8000):
+        self._active_agent = active_agent.upper()
+        if statuses:
+            self._statuses.update(statuses)
+        self.raise_()
+        self.show()
+        self.update()
+        self._hide_tmr.start(timeout_ms)
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        W, H = self.width(), self.height()
+
+        # Dim overlay
+        p.fillRect(0, 0, W, H, qcol("#000d1a", 200))
+
+        # Title
+        p.setFont(QFont("Courier New", 13, QFont.Weight.Bold))
+        p.setPen(QPen(qcol(PRI_BRIGHT, 230), 1))
+        p.drawText(QRectF(0, 20, W, 30), Qt.AlignmentFlag.AlignCenter, "◈  AGENT STATUS BOARD  ◈")
+
+        # Thin separator line
+        p.setPen(QPen(qcol(BORDER_COL, 180), 1))
+        p.drawLine(QPointF(W * 0.1, 56), QPointF(W * 0.9, 56))
+
+        n = len(_AGENT_LIST)
+        card_w = min(180, (W - 80) // n)
+        card_h = 110
+        total_w = card_w * n + 10 * (n - 1)
+        start_x = (W - total_w) / 2
+        card_y  = (H - card_h) / 2 - 10
+
+        for i, agent in enumerate(_AGENT_LIST):
+            col = AGENT_COLORS.get(agent, TEXT_WHITE)
+            is_active = (agent == self._active_agent)
+            cx = start_x + i * (card_w + 10)
+
+            # Card background
+            card_path = QPainterPath()
+            card_path.addRoundedRect(QRectF(cx, card_y, card_w, card_h), 6, 6)
+            bg_a = 220 if is_active else 140
+            p.fillPath(card_path, qcol("#0a1f3a" if is_active else "#060e1a", bg_a))
+
+            # Border (brighter for active)
+            border_a = 255 if is_active else 100
+            p.setPen(QPen(qcol(col, border_a), 1.5 if is_active else 0.8))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            p.drawPath(card_path)
+
+            # Active indicator bar at top
+            if is_active:
+                bar = QPainterPath()
+                bar.addRoundedRect(QRectF(cx, card_y, card_w, 3), 2, 2)
+                p.fillPath(bar, qcol(col, 255))
+
+            # Agent name
+            p.setFont(QFont("Courier New", 12, QFont.Weight.Bold))
+            p.setPen(QPen(qcol(col, 255 if is_active else 180), 1))
+            p.drawText(QRectF(cx, card_y + 12, card_w, 22), Qt.AlignmentFlag.AlignCenter, agent)
+
+            # Mode label
+            mode = _AGENT_MODES.get(agent, "")
+            p.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
+            p.setPen(QPen(qcol(col, 160), 1))
+            p.drawText(QRectF(cx, card_y + 36, card_w, 14), Qt.AlignmentFlag.AlignCenter, mode)
+
+            # Separator line
+            p.setPen(QPen(qcol(col, 60), 0.5))
+            p.drawLine(QPointF(cx + 10, card_y + 53), QPointF(cx + card_w - 10, card_y + 53))
+
+            # Status
+            status = self._statuses.get(agent, "NOMINAL")
+            p.setFont(QFont("Courier New", 8))
+            p.setPen(QPen(qcol(GREEN if is_active else TEXT_MED, 200), 1))
+            # Wrap long status
+            p.drawText(
+                QRectF(cx + 4, card_y + 60, card_w - 8, 42),
+                Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+                status
+            )
+
+            # Active dot
+            if is_active:
+                p.setBrush(QBrush(qcol(GREEN, 255)))
+                p.setPen(Qt.PenStyle.NoPen)
+                p.drawEllipse(QPointF(cx + card_w - 10, card_y + 10), 4, 4)
+
+        # Bottom hint
+        p.setFont(QFont("Courier New", 8))
+        p.setPen(QPen(qcol(TEXT_DIM, 160), 1))
+        p.drawText(QRectF(0, H - 30, W, 20), Qt.AlignmentFlag.AlignCenter,
+                   "Board auto-closes in 8 seconds  ·  All systems operational")
+
+        p.end()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # CROSSHAIR — bottom-left targeting reticle
 # ══════════════════════════════════════════════════════════════════════════════
 class CrosshairWidget(QWidget):
@@ -987,6 +1117,10 @@ class HudWindow(QMainWindow):
         self._dot_grid.setGeometry(0, 0, 9999, 9999)
         self._dot_grid.lower()
 
+        # Agent status board overlay (sits above everything)
+        self.agent_board = AgentStatusBoard(central)
+        self.agent_board.setGeometry(0, 0, self.width(), self.height())
+
         # Signals
         self._log_sig.connect(self._on_log)
         self._state_sig.connect(self._apply_state)
@@ -1000,6 +1134,8 @@ class HudWindow(QMainWindow):
         super().resizeEvent(e)
         if hasattr(self, "_dot_grid"):
             self._dot_grid.setGeometry(0, 0, self.width(), self.height())
+        if hasattr(self, "agent_board"):
+            self.agent_board.setGeometry(0, 0, self.width(), self.height())
 
     def _check_config(self) -> bool:
         path = BASE_DIR / "config" / "api_keys.json"
@@ -1241,3 +1377,6 @@ class JarvisUI:
     def set_pill_state(self, name: str, active: bool):
         self._win.top_bar.set_pill_state(name, active)
         self._win.right_panel.set_dot(name, active)
+
+    def show_agent_board(self, active_agent: str = "NEXUS", statuses: dict | None = None):
+        self._win.agent_board.show_board(active_agent, statuses)
