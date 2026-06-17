@@ -273,14 +273,23 @@ class OrbCanvas(QWidget):
                         Qt.AlignmentFlag.AlignCenter, label
                     )
 
+        # -- Wide outer halo (Iron Man ambient glow) --
+        halo = QRadialGradient(QPointF(cx, cy), orb_r * 2.2)
+        halo.setColorAt(0.0, qcol(self._color, 28))
+        halo.setColorAt(0.6, qcol(self._color, 10))
+        halo.setColorAt(1.0, qcol(self._color, 0))
+        p.setBrush(QBrush(halo))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawEllipse(QPointF(cx, cy), orb_r * 2.2, orb_r * 2.2)
+
         # -- Glow bloom around orb --
-        glow = QRadialGradient(QPointF(cx, cy), orb_r * 1.4)
-        glow.setColorAt(0.0, qcol(self._color, 35))
-        glow.setColorAt(0.5, qcol(self._color, 12))
+        glow = QRadialGradient(QPointF(cx, cy), orb_r * 1.6)
+        glow.setColorAt(0.0, qcol(self._color, 80))
+        glow.setColorAt(0.4, qcol(self._color, 30))
         glow.setColorAt(1.0, qcol(self._color, 0))
         p.setBrush(QBrush(glow))
         p.setPen(Qt.PenStyle.NoPen)
-        p.drawEllipse(QPointF(cx, cy), orb_r * 1.4, orb_r * 1.4)
+        p.drawEllipse(QPointF(cx, cy), orb_r * 1.6, orb_r * 1.6)
 
         # -- Draw particles --
         for pt in self._particles:
@@ -288,19 +297,28 @@ class OrbCanvas(QWidget):
             x = cx + dist * math.cos(pt[0])
             y = cy + dist * math.sin(pt[0])
             brightness = pt[4]
-            particle_a = int(200 * brightness * (0.6 + 0.4 * dist / orb_r))
-            radius = 1.0 + brightness * 0.8
+            particle_a = int(230 * brightness * (0.5 + 0.5 * dist / orb_r))
+            radius = 1.2 + brightness * 1.0
             p.setPen(Qt.PenStyle.NoPen)
             p.setBrush(QBrush(qcol(self._color, min(255, particle_a))))
             p.drawEllipse(QPointF(x, y), radius, radius)
 
+        # -- Inner glow shell --
+        shell = QRadialGradient(QPointF(cx, cy), orb_r * 0.55)
+        shell.setColorAt(0.0, qcol(self._color, 0))
+        shell.setColorAt(0.7, qcol(self._color, 50))
+        shell.setColorAt(1.0, qcol(self._color, 0))
+        p.setBrush(QBrush(shell))
+        p.drawEllipse(QPointF(cx, cy), orb_r * 0.55, orb_r * 0.55)
+
         # -- Bright orb core --
-        core_glow = QRadialGradient(QPointF(cx, cy), orb_r * 0.25)
-        core_glow.setColorAt(0.0, qcol("#ffffff", 180))
-        core_glow.setColorAt(0.4, qcol(self._color, 120))
+        core_glow = QRadialGradient(QPointF(cx, cy), orb_r * 0.30)
+        core_glow.setColorAt(0.0, qcol("#ffffff", 240))
+        core_glow.setColorAt(0.3, qcol("#ffffff", 160))
+        core_glow.setColorAt(0.6, qcol(self._color, 180))
         core_glow.setColorAt(1.0, qcol(self._color, 0))
         p.setBrush(QBrush(core_glow))
-        p.drawEllipse(QPointF(cx, cy), orb_r * 0.25, orb_r * 0.25)
+        p.drawEllipse(QPointF(cx, cy), orb_r * 0.30, orb_r * 0.30)
 
         p.end()
 
@@ -696,25 +714,36 @@ class RightPanel(QWidget):
             lay.addLayout(row)
             self._dot_pills[name] = dot
 
-        lay.addSpacing(4)
-        lay.addWidget(_hdr("DIAGNOSTICS"))
+        lay.addSpacing(8)
+        lay.addWidget(_hdr("AGENTS"))
 
-        self._diag = QTextEdit()
-        self._diag.setReadOnly(True)
-        self._diag.setFont(QFont("Courier New", 9))
-        self._diag.setStyleSheet(f"""
-            QTextEdit {{
-                background: {BG}; color: #55cc88;
-                border: 1px solid {BORDER_COL}; border-radius: 2px;
-                padding: 4px;
-            }}
-        """)
-        lay.addWidget(self._diag, stretch=1)
+        # Agent roster: 7 colored pills, one per agent
+        self._agent_dots: dict[str, QLabel] = {}
+        _roster = [
+            ("NEXUS",  AGENT_COLORS["NEXUS"]),
+            ("SCOUT",  AGENT_COLORS["SCOUT"]),
+            ("ORACLE", AGENT_COLORS["ORACLE"]),
+            ("BROKER", AGENT_COLORS["BROKER"]),
+            ("CHEF",   AGENT_COLORS["CHEF"]),
+            ("FORGE",  AGENT_COLORS["FORGE"]),
+            ("VECTOR", AGENT_COLORS["VECTOR"]),
+        ]
+        for a_name, a_col in _roster:
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 2, 0, 2)
+            dot = QLabel("◆")
+            dot.setFont(QFont("Courier New", 9))
+            dot.setStyleSheet(f"color: #1a2a3a; background: transparent;")
+            lbl = QLabel(a_name)
+            lbl.setFont(QFont("Courier New", 9))
+            lbl.setStyleSheet(f"color: {TEXT_DIM}; background: transparent;")
+            row.addWidget(dot)
+            row.addWidget(lbl)
+            row.addStretch()
+            lay.addLayout(row)
+            self._agent_dots[a_name] = (dot, lbl, a_col)
 
-        self._diag_buf: list[str] = []
-        self._diag_tmr = QTimer(self)
-        self._diag_tmr.timeout.connect(self._flush_diag)
-        self._diag_tmr.start(100)
+        lay.addStretch()
 
     def set_dot(self, name: str, active: bool):
         dot = self._dot_pills.get(name)
@@ -723,17 +752,15 @@ class RightPanel(QWidget):
             c = col_map.get(name, PRI_BRIGHT) if active else "#2a3a4a"
             dot.setStyleSheet(f"color: {c}; background: transparent;")
 
-    def append_diag(self, text: str):
-        self._diag_buf.append(text)
-
-    def _flush_diag(self):
-        if not self._diag_buf:
-            return
-        for line in self._diag_buf:
-            self._diag.append(line)
-        self._diag_buf.clear()
-        sb = self._diag.verticalScrollBar()
-        sb.setValue(sb.maximum())
+    def set_active_agent(self, agent_name: str):
+        """Highlight the active agent in the roster."""
+        for a, (dot, lbl, col) in self._agent_dots.items():
+            if a == agent_name.upper():
+                dot.setStyleSheet(f"color: {col}; background: transparent;")
+                lbl.setStyleSheet(f"color: {col}; background: transparent; font-weight: bold;")
+            else:
+                dot.setStyleSheet("color: #1a2a3a; background: transparent;")
+                lbl.setStyleSheet(f"color: {TEXT_DIM}; background: transparent;")
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1317,7 +1344,6 @@ class HudWindow(QMainWindow):
 
     def _on_log(self, text: str):
         self.left_panel.append_log(text)
-        self.right_panel.append_diag(text)
 
     def _apply_state(self, state: str):
         state_map = {
@@ -1447,6 +1473,7 @@ class JarvisUI:
     # ── New interface for agent system ──────────────────────────────────────
     def set_active_agent(self, name: str, status: str):
         self._win.agent_card.set_active_agent(name, status)
+        self._win.right_panel.set_active_agent(name)
         # Drive orb color from agent color
         col = AGENT_COLORS.get(name.upper(), PRI)
         self._win.orb.set_agent_color(col)

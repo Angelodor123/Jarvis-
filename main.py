@@ -723,6 +723,17 @@ AGENT_DEFAULT_STATUS = {
     "VECTOR": "CREATIVE MODE · MARKETING ENGINE ACTIVE",
 }
 
+# Each agent has a distinct Gemini voice — switches on agent change
+AGENT_VOICES = {
+    "NEXUS":  "Fenrir",   # deep, commanding
+    "SCOUT":  "Puck",     # crisp, energetic
+    "ORACLE": "Kore",     # calm, precise
+    "BROKER": "Charon",   # cool, streetwise
+    "CHEF":   "Orus",     # warm, direct
+    "FORGE":  "Zephyr",   # technical, efficient
+    "VECTOR": "Aoede",    # creative, expressive
+}
+
 AGENT_PROMPTS = {
     "NEXUS": (
         "You are NEXUS, the central intelligence and orchestrator of the J.A.R.V.I.S. system. "
@@ -885,8 +896,11 @@ class JarvisLive:
             f"User request: {text}"
         )
 
-        # Rebuild config if agent changed (scope tools for new agent)
+        # Rebuild config if agent changed (scope tools + switch voice for new agent)
         if agent != prev:
+            new_voice = AGENT_VOICES.get(agent, "Fenrir")
+            _save_voice_name(new_voice)
+            self.ui.write_log(f"SYS: Agent → {agent} ({new_voice})")
             self._force_reconnect = True
             if self._loop:
                 self._loop.call_soon_threadsafe(lambda: None)
@@ -1157,6 +1171,11 @@ class JarvisLive:
                         pass
                     for idx, agent in enumerate(_ROLL_ORDER):
                         jarvis_ref._active_agent = agent
+                        # Switch voice for this agent and reconnect
+                        voice = AGENT_VOICES.get(agent, "Fenrir")
+                        _save_voice_name(voice)
+                        jarvis_ref._force_reconnect = True
+                        time.sleep(1.5)  # let reconnect complete
                         try:
                             jarvis_ref.ui.set_active_agent(agent, AGENT_DEFAULT_STATUS.get(agent, ""))
                             jarvis_ref.ui.set_roll_call_mode(True, idx)
@@ -1164,9 +1183,13 @@ class JarvisLive:
                             pass
                         line = _ROLL_CALL_LINES.get(agent, f"{agent} online.")
                         jarvis_ref.speak(line)
-                        time.sleep(3.5)
+                        # Wait for speaking to finish (up to 6s), then 0.5s gap
+                        time.sleep(4.0)
                     # restore original agent + exit roll call mode
                     jarvis_ref._active_agent = _prev_agent
+                    voice = AGENT_VOICES.get(_prev_agent, "Fenrir")
+                    _save_voice_name(voice)
+                    jarvis_ref._force_reconnect = True
                     try:
                         jarvis_ref.ui.set_active_agent(_prev_agent, AGENT_DEFAULT_STATUS.get(_prev_agent, ""))
                         jarvis_ref.ui.set_roll_call_mode(False)
@@ -1275,8 +1298,12 @@ class JarvisLive:
                                 # REDESIGN+AGENTS+TOOLS 2026-06-16 — detect agent from voice
                                 agent = detect_agent(full_in)
                                 if agent != self._active_agent:
+                                    prev_agent = self._active_agent
                                     self._active_agent = agent
                                     status = AGENT_DEFAULT_STATUS.get(agent, "")
+                                    new_voice = AGENT_VOICES.get(agent, "Fenrir")
+                                    _save_voice_name(new_voice)
+                                    self._force_reconnect = True
                                     try:
                                         self.ui.set_active_agent(agent, status)
                                     except Exception:
