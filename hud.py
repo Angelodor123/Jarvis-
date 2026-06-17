@@ -67,15 +67,25 @@ GREEN_D     = "#00aa55"
 ORANGE      = "#ff6600"
 AMBER       = "#ffa018"
 
-# Agent colors
+# Agent colors — each agent owns a unique hue that drives orb + card accent
 AGENT_COLORS = {
-    "NEXUS":  "#ffffff",
-    "SCOUT":  "#00aaff",
-    "ORACLE": "#aa44ff",
-    "BROKER": "#00ff88",
-    "CHEF":   "#ff8800",
-    "FORGE":  "#ff4444",
-    "VECTOR": "#ff44aa",
+    "NEXUS":  "#00ccff",   # command cyan
+    "SCOUT":  "#ff5500",   # field orange
+    "ORACLE": "#9944ff",   # comm purple
+    "BROKER": "#00ff88",   # market green
+    "CHEF":   "#ff2200",   # kitchen red
+    "FORGE":  "#0088ff",   # dev blue
+    "VECTOR": "#ff00aa",   # creative magenta
+}
+
+AGENT_ROLES = {
+    "NEXUS":  "CENTRAL INTELLIGENCE AGENT",
+    "SCOUT":  "RESEARCH AGENT",
+    "ORACLE": "COMMS & SCHEDULING AGENT",
+    "BROKER": "MARKET INTELLIGENCE AGENT",
+    "CHEF":   "KITCHEN OPERATIONS AGENT",
+    "FORGE":  "DEVELOPER AGENT",
+    "VECTOR": "CONTENT OPERATIONS AGENT",
 }
 
 # ── Shared button stylesheet ───────────────────────────────────────────────────
@@ -165,6 +175,17 @@ class OrbCanvas(QWidget):
 
     def set_orb_state(self, state: str):
         self._state = state.lower()
+        # State only overrides color when not in agent-color mode
+        if not hasattr(self, "_agent_color_override") or not self._agent_color_override:
+            self._color = self.ORB_STATES.get(self._state, PRI)
+
+    def set_agent_color(self, hex_color: str):
+        """Lock the orb to the agent's hue until cleared."""
+        self._agent_color_override = True
+        self._color = hex_color
+
+    def clear_agent_color(self):
+        self._agent_color_override = False
         self._color = self.ORB_STATES.get(self._state, PRI)
 
     def _step(self):
@@ -719,53 +740,81 @@ class RightPanel(QWidget):
 # AGENT CARD — bottom-center active agent display
 # ══════════════════════════════════════════════════════════════════════════════
 class AgentCard(QWidget):
+    _AGENTS = ["NEXUS", "SCOUT", "ORACLE", "BROKER", "CHEF", "FORGE", "VECTOR"]
+
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setFixedHeight(70)
+        self.setFixedHeight(90)
         self._agent_name   = "NEXUS"
+        self._agent_role   = AGENT_ROLES.get("NEXUS", "")
         self._agent_status = "ORCHESTRATING · ALL SYSTEMS NOMINAL"
-        self._agent_color  = AGENT_COLORS.get("NEXUS", TEXT_WHITE)
+        self._agent_color  = AGENT_COLORS["NEXUS"]
         self._speaking     = False
         self._pulse        = 0.0
+        self._roll_call    = False     # True while roll call is running
+        self._roll_idx     = 0        # current agent index (0-6)
 
-        self._border_col = self._agent_color
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(0)
 
-        lay = QHBoxLayout(self)
-        lay.setContentsMargins(12, 8, 12, 8)
-        lay.setSpacing(10)
+        # Header row: ROLL CALL label left, counter right
+        self._header_w = QWidget()
+        self._header_w.setFixedHeight(20)
+        self._header_w.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+        h_lay = QHBoxLayout(self._header_w)
+        h_lay.setContentsMargins(12, 0, 12, 0)
 
-        # Left: label + name + status
+        self._header_lbl = QLabel("ACTIVE SPEAKER")
+        self._header_lbl.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self._header_lbl.setStyleSheet(f"color: {TEXT_MED}; background: transparent;")
+        self._counter_lbl = QLabel("")
+        self._counter_lbl.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
+        self._counter_lbl.setStyleSheet(f"color: {TEXT_MED}; background: transparent;")
+        h_lay.addWidget(self._header_lbl)
+        h_lay.addStretch()
+        h_lay.addWidget(self._counter_lbl)
+        lay.addWidget(self._header_w)
+
+        # Body row
+        body_w = QWidget()
+        body_w.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+        b_lay = QHBoxLayout(body_w)
+        b_lay.setContentsMargins(12, 4, 12, 8)
+        b_lay.setSpacing(10)
+
+        # Name + role + status column
         left_lay = QVBoxLayout()
-        left_lay.setSpacing(2)
+        left_lay.setSpacing(1)
         left_lay.setContentsMargins(0, 0, 0, 0)
-
-        self._micro_lbl = QLabel("ACTIVE AGENT")
-        self._micro_lbl.setFont(QFont("Courier New", 9))
-        self._micro_lbl.setStyleSheet(f"color: {TEXT_MED}; background: transparent;")
 
         self._name_lbl = QLabel("NEXUS")
         self._name_lbl.setFont(QFont("Courier New", 20, QFont.Weight.Bold))
         self._name_lbl.setStyleSheet(f"color: {self._agent_color}; background: transparent;")
 
+        self._role_lbl = QLabel(self._agent_role)
+        self._role_lbl.setFont(QFont("Courier New", 9))
+        self._role_lbl.setStyleSheet(f"color: {TEXT_MED}; background: transparent;")
+
         self._status_lbl = QLabel(self._agent_status)
-        self._status_lbl.setFont(QFont("Courier New", 10))
-        self._status_lbl.setStyleSheet(f"color: {TEXT_MED}; background: transparent;")
+        self._status_lbl.setFont(QFont("Courier New", 9))
+        self._status_lbl.setStyleSheet(f"color: {TEXT_DIM}; background: transparent;")
 
-        left_lay.addWidget(self._micro_lbl)
         left_lay.addWidget(self._name_lbl)
+        left_lay.addWidget(self._role_lbl)
         left_lay.addWidget(self._status_lbl)
-        lay.addLayout(left_lay, stretch=1)
+        b_lay.addLayout(left_lay, stretch=1)
 
-        # Right: ON AIR indicator
-        right_lay = QVBoxLayout()
-        right_lay.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        # ON AIR pulse right
         self._onair_lbl = QLabel("● ON · AIR")
         self._onair_lbl.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
-        self._onair_lbl.setStyleSheet(f"color: #2a3a4a; background: transparent;")
-        right_lay.addWidget(self._onair_lbl)
-        lay.addLayout(right_lay)
+        self._onair_lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self._onair_lbl.setStyleSheet("color: #1a2a3a; background: transparent;")
+        b_lay.addWidget(self._onair_lbl)
 
-        # Pulse timer for ON AIR
+        lay.addWidget(body_w)
+
+        # Pulse timer
         self._pulse_tmr = QTimer(self)
         self._pulse_tmr.timeout.connect(self._pulse_step)
         self._pulse_tmr.start(80)
@@ -774,19 +823,24 @@ class AgentCard(QWidget):
         if self._speaking:
             self._pulse = (self._pulse + 0.15) % (2 * math.pi)
             a = int(150 + 105 * math.sin(self._pulse))
-            col = ORANGE
-            self._onair_lbl.setStyleSheet(f"color: rgba({_hex_to_rgba(col, a)}); background: transparent;")
+            self._onair_lbl.setStyleSheet(
+                f"color: rgba({_hex_to_rgba(self._agent_color, a)}); background: transparent;"
+            )
         else:
-            self._onair_lbl.setStyleSheet(f"color: #2a3a4a; background: transparent;")
+            self._onair_lbl.setStyleSheet("color: #1a2a3a; background: transparent;")
 
     def set_active_agent(self, name: str, status: str):
         self._agent_name   = name.upper()
         self._agent_status = status
         self._agent_color  = AGENT_COLORS.get(self._agent_name, TEXT_WHITE)
-        self._border_col   = self._agent_color
+        self._agent_role   = AGENT_ROLES.get(self._agent_name, "")
         self._name_lbl.setText(self._agent_name)
         self._name_lbl.setStyleSheet(f"color: {self._agent_color}; background: transparent;")
+        self._role_lbl.setText(self._agent_role)
         self._status_lbl.setText(status)
+        if not self._roll_call:
+            self._header_lbl.setText("ACTIVE SPEAKER")
+            self._counter_lbl.setText("")
         self.update()
 
     def update_agent_status(self, status: str):
@@ -796,17 +850,46 @@ class AgentCard(QWidget):
     def set_speaking(self, v: bool):
         self._speaking = v
 
+    def set_roll_call_mode(self, active: bool, agent_idx: int = 0):
+        """Switch header between normal and roll call mode."""
+        self._roll_call = active
+        self._roll_idx  = agent_idx
+        if active:
+            self._header_lbl.setText("ROLL CALL · ACTIVE SPEAKER")
+            self._header_lbl.setStyleSheet(f"color: {self._agent_color}; background: transparent;")
+            self._counter_lbl.setText(f"{agent_idx + 1} / {len(self._AGENTS)}")
+            self._counter_lbl.setStyleSheet(f"color: {self._agent_color}; background: transparent;")
+        else:
+            self._header_lbl.setText("ACTIVE SPEAKER")
+            self._header_lbl.setStyleSheet(f"color: {TEXT_MED}; background: transparent;")
+            self._counter_lbl.setText("")
+        self.update()
+
     def paintEvent(self, _):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         W, H = self.width(), self.height()
+
+        # Card background
         path = QPainterPath()
-        path.addRoundedRect(QRectF(0, 0, W, H), 8, 8)
-        p.fillPath(path, qcol("#0a1f3a", 230))
-        pen = QPen(qcol(self._border_col, 180), 1)
-        p.setPen(pen)
+        path.addRoundedRect(QRectF(0, 0, W, H), 6, 6)
+        p.fillPath(path, qcol("#080e1c", 240))
+
+        # Colored top accent bar
+        bar = QPainterPath()
+        bar.addRoundedRect(QRectF(0, 0, W, 3), 2, 2)
+        p.fillPath(bar, qcol(self._agent_color, 230))
+
+        # Card border in agent color
+        p.setPen(QPen(qcol(self._agent_color, 100), 1))
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.drawPath(path)
+
+        # Left edge accent stripe
+        stripe = QPainterPath()
+        stripe.addRoundedRect(QRectF(0, 3, 3, H - 3), 1, 1)
+        p.fillPath(stripe, qcol(self._agent_color, 160))
+
         p.end()
 
 
@@ -1364,6 +1447,9 @@ class JarvisUI:
     # ── New interface for agent system ──────────────────────────────────────
     def set_active_agent(self, name: str, status: str):
         self._win.agent_card.set_active_agent(name, status)
+        # Drive orb color from agent color
+        col = AGENT_COLORS.get(name.upper(), PRI)
+        self._win.orb.set_agent_color(col)
 
     def update_agent_status(self, status: str):
         self._win.agent_card.update_agent_status(status)
@@ -1380,3 +1466,6 @@ class JarvisUI:
 
     def show_agent_board(self, active_agent: str = "NEXUS", statuses: dict | None = None):
         self._win.agent_board.show_board(active_agent, statuses)
+
+    def set_roll_call_mode(self, active: bool, agent_idx: int = 0):
+        self._win.agent_card.set_roll_call_mode(active, agent_idx)

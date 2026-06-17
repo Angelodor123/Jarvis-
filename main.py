@@ -1147,21 +1147,29 @@ class JarvisLive:
                 }
                 _prev_agent = self._active_agent
 
+                _ROLL_ORDER = ["NEXUS", "SCOUT", "ORACLE", "BROKER", "CHEF", "FORGE", "VECTOR"]
+
                 def _do_roll_call(jarvis_ref=self):
                     import time
-                    for agent in ["NEXUS", "SCOUT", "ORACLE", "BROKER", "CHEF", "FORGE", "VECTOR"]:
+                    try:
+                        jarvis_ref.ui.set_roll_call_mode(True, 0)
+                    except Exception:
+                        pass
+                    for idx, agent in enumerate(_ROLL_ORDER):
                         jarvis_ref._active_agent = agent
                         try:
                             jarvis_ref.ui.set_active_agent(agent, AGENT_DEFAULT_STATUS.get(agent, ""))
+                            jarvis_ref.ui.set_roll_call_mode(True, idx)
                         except Exception:
                             pass
                         line = _ROLL_CALL_LINES.get(agent, f"{agent} online.")
                         jarvis_ref.speak(line)
                         time.sleep(3.5)
-                    # restore original agent
+                    # restore original agent + exit roll call mode
                     jarvis_ref._active_agent = _prev_agent
                     try:
                         jarvis_ref.ui.set_active_agent(_prev_agent, AGENT_DEFAULT_STATUS.get(_prev_agent, ""))
+                        jarvis_ref.ui.set_roll_call_mode(False)
                     except Exception:
                         pass
 
