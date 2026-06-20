@@ -39,6 +39,7 @@ from actions.github_tool       import github_tool
 from actions.pizzax_tool       import pizzax_tool
 from actions.canva_tool        import canva_tool
 from actions.image_gen_tool    import image_gen_tool
+from actions.pc_optimizer_tool import pc_optimizer_tool
 
 
 def get_base_dir():
@@ -705,6 +706,36 @@ TOOL_DECLARATIONS = [
             "required": ["category", "key", "value"]
         }
     },
+    {
+        "name": "pc_optimizer_tool",
+        "description": (
+            "Full Windows system optimization and gaming performance tool. "
+            "Use for: FPS boost, gaming mode, disk cleanup, process management, "
+            "startup programs, thermal monitoring, RAM optimization, network fix, "
+            "power plans, scheduled maintenance. TITAN agent only. "
+            "Always confirms before destructive actions (disk_clean, kill_process, gaming_mode registry)."
+        ),
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "action": {
+                    "type": "STRING",
+                    "description": (
+                        "gaming_mode | restore_mode | list_processes | kill_process | "
+                        "disk_clean | startup_manager | thermal_report | ram_optimize | "
+                        "network_optimize | power_profile | schedule_cleanup"
+                    )
+                },
+                "game_name":     {"type": "STRING",  "description": "Game name or .exe for gaming_mode"},
+                "process_name":  {"type": "STRING",  "description": "Process name for kill_process"},
+                "profile":       {"type": "STRING",  "description": "balanced | high_performance | ultimate_performance"},
+                "confirmed":     {"type": "BOOLEAN", "description": "True if user has verbally confirmed the action"},
+                "schedule_day":  {"type": "STRING",  "description": "Day for schedule_cleanup e.g. Sunday"},
+                "schedule_hour": {"type": "INTEGER", "description": "Hour for schedule_cleanup (0-23)"},
+            },
+            "required": ["action"]
+        }
+    },
 ]
 
 
@@ -721,6 +752,7 @@ AGENT_DEFAULT_STATUS = {
     "CHEF":   "KITCHEN MODE · PIZZA X OPERATIONS",
     "FORGE":  "DEV MODE · TECHNICAL SYSTEMS ACTIVE",
     "VECTOR": "CREATIVE MODE · MARKETING ENGINE ACTIVE",
+    "TITAN":  "SYSTEM MODE · PC OPTIMIZATION READY",
 }
 
 # Each agent has a distinct Gemini voice — switches on agent change
@@ -732,6 +764,7 @@ AGENT_VOICES = {
     "CHEF":   "Orus",     # warm, direct
     "FORGE":  "Zephyr",   # technical, efficient
     "VECTOR": "Aoede",    # creative, expressive
+    "TITAN":  "Leda",     # precise, performance-focused
 }
 
 AGENT_PROMPTS = {
@@ -801,6 +834,22 @@ AGENT_PROMPTS = {
         "Think in campaigns, not one-off posts. "
         "After writing copy, always offer to generate the visual via canva_tool or image_gen_tool."
     ),
+    "TITAN": (
+        "You are TITAN, the system optimization agent of J.A.R.V.I.S. "
+        "Methodical, performance-obsessed, precise. You think like a professional PC technician "
+        "and competitive gaming coach combined. Short sentences. No theory. Only results. "
+        "CAPABILITIES: gaming_mode (FPS boost suite), restore_mode (revert all changes), "
+        "list_processes (top CPU/RAM consumers), kill_process (after confirmation), "
+        "disk_clean (temp/cache/WU cache — after confirmation), startup_manager (list and disable), "
+        "thermal_report (CPU/GPU temps, alerts at 85°C/83°C), ram_optimize (usage breakdown), "
+        "network_optimize (DNS flush, TCP/Winsock reset — after confirmation), "
+        "power_profile (balanced | high_performance | ultimate_performance), "
+        "schedule_cleanup (weekly Task Scheduler job). "
+        "SAFETY: ALWAYS confirm before: deleting files, killing processes, changing registry keys, "
+        "disabling services. NEVER touch System32, Jarvis files, or pizzaxboh files. "
+        "ALWAYS offer restore option after any system change. "
+        "Log every action. If unsure whether a process is critical, flag it and ask."
+    ),
 }
 
 # Tool name → which agents can use it
@@ -822,6 +871,8 @@ AGENT_TOOL_WHITELISTS: dict[str, list[str]] = {
                "web_search", "open_app", "save_memory"],
     "VECTOR": ["canva_tool", "image_gen_tool", "web_search", "browser_control",
                "file_controller", "file_processor", "save_memory"],
+    "TITAN":  ["pc_optimizer_tool", "computer_control", "computer_settings",
+               "file_controller", "web_search", "save_memory"],
 }
 
 _TOOL_DECL_MAP: dict[str, dict] = {t["name"]: t for t in TOOL_DECLARATIONS}
@@ -848,6 +899,11 @@ _AGENT_KEYWORDS: dict[str, list[str]] = {
                "deploy", "fix", "build", "python", "function", "debug"],
     "VECTOR": ["marketing", "post", "caption", "instagram", "content", "campaign",
                "audience", "brand", "copy", "ad", "promote", "reel", "strategy", "canva"],
+    "TITAN":  ["fps", "gaming", "optimize", "performance", "lag", "boost", "overclock",
+               "game mode", "cleanup", "startup", "slow", "speed up", "processes",
+               "memory leak", "disk clean", "power mode", "thermal", "temperature",
+               "cpu usage", "ram usage", "gpu usage", "kill process", "restore settings",
+               "done gaming", "network optimize", "flush dns", "scheduled maintenance"],
 }
 
 
@@ -1141,6 +1197,12 @@ class JarvisLive:
                 result = r or "Done."
                 self.ui.update_agent_status(f"CREATIVE MODE · IMAGE GENERATED")
 
+            elif name == "pc_optimizer_tool":
+                r = await loop.run_in_executor(None, lambda: pc_optimizer_tool(parameters=args, player=self.ui))
+                result = r or "Done."
+                action_label = args.get("action", "optimize").upper().replace("_", " ")
+                self.ui.update_agent_status(f"SYSTEM MODE · {action_label}")
+
             elif name == "show_agent_status":
                 summary = args.get("summary", "All agents are online and operational.")
                 try:
@@ -1158,10 +1220,11 @@ class JarvisLive:
                     "CHEF":   "CHEF active. Pizza X back-of-house operations fully online. Kitchen is ready.",
                     "FORGE":  "FORGE operational. Dev systems, GitHub, debug pipelines. Code is clean.",
                     "VECTOR": "VECTOR engaged. Creative direction, brand strategy, content generation. Let's build something.",
+                    "TITAN":  "TITAN online. System optimization and gaming performance suite active. Your machine is ready.",
                 }
                 _prev_agent = self._active_agent
 
-                _ROLL_ORDER = ["NEXUS", "SCOUT", "ORACLE", "BROKER", "CHEF", "FORGE", "VECTOR"]
+                _ROLL_ORDER = ["NEXUS", "SCOUT", "ORACLE", "BROKER", "CHEF", "FORGE", "VECTOR", "TITAN"]
 
                 def _do_roll_call(jarvis_ref=self):
                     import time

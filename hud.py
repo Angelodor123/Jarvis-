@@ -76,6 +76,7 @@ AGENT_COLORS = {
     "CHEF":   "#ff2200",   # kitchen red
     "FORGE":  "#0088ff",   # dev blue
     "VECTOR": "#ff00aa",   # creative magenta
+    "TITAN":  "#00ffcc",   # system teal
 }
 
 AGENT_ROLES = {
@@ -86,6 +87,7 @@ AGENT_ROLES = {
     "CHEF":   "KITCHEN OPERATIONS AGENT",
     "FORGE":  "DEVELOPER AGENT",
     "VECTOR": "CONTENT OPERATIONS AGENT",
+    "TITAN":  "PC OPTIMIZATION & GAMING AGENT",
 }
 
 # ── Shared button stylesheet ───────────────────────────────────────────────────
@@ -727,6 +729,7 @@ class RightPanel(QWidget):
             ("CHEF",   AGENT_COLORS["CHEF"]),
             ("FORGE",  AGENT_COLORS["FORGE"]),
             ("VECTOR", AGENT_COLORS["VECTOR"]),
+            ("TITAN",  AGENT_COLORS["TITAN"]),
         ]
         for a_name, a_col in _roster:
             row = QHBoxLayout()
@@ -767,7 +770,7 @@ class RightPanel(QWidget):
 # AGENT CARD — bottom-center active agent display
 # ══════════════════════════════════════════════════════════════════════════════
 class AgentCard(QWidget):
-    _AGENTS = ["NEXUS", "SCOUT", "ORACLE", "BROKER", "CHEF", "FORGE", "VECTOR"]
+    _AGENTS = ["NEXUS", "SCOUT", "ORACLE", "BROKER", "CHEF", "FORGE", "VECTOR", "TITAN"]
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -928,7 +931,7 @@ def _hex_to_rgba(hex_col: str, alpha: int) -> str:
 # ══════════════════════════════════════════════════════════════════════════════
 # AGENT STATUS BOARD — full overlay showing all 7 agents
 # ══════════════════════════════════════════════════════════════════════════════
-_AGENT_LIST = ["NEXUS", "SCOUT", "ORACLE", "BROKER", "CHEF", "FORGE", "VECTOR"]
+_AGENT_LIST = ["NEXUS", "SCOUT", "ORACLE", "BROKER", "CHEF", "FORGE", "VECTOR", "TITAN"]
 _AGENT_MODES = {
     "NEXUS":  "ORCHESTRATING",
     "SCOUT":  "RESEARCH MODE",
@@ -937,6 +940,7 @@ _AGENT_MODES = {
     "CHEF":   "KITCHEN MODE",
     "FORGE":  "DEV MODE",
     "VECTOR": "CREATIVE MODE",
+    "TITAN":  "SYSTEM MODE",
 }
 
 
